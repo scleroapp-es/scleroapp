@@ -79,6 +79,7 @@ function FormCita({ form, setForm, onSubmit, onCancel, guardando, editando }) {
 }
 
 function CitaCard({ cita, onEditar, onEliminar }) {
+  const navigate = useNavigate();
   const hoy = format(new Date(), 'yyyy-MM-dd');
   const pasada = cita.fecha < hoy;
   return (
