@@ -5,7 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import { format, differenceInDays, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { HospitalSelector } from '../components/HospitalSelector';
-import { useNavigate as useNav } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 const ESPECIALIDADES = ['Reumatología', 'Cardiología', 'Neumología', 'Dermatología', 'Nefrología', 'Digestivo', 'Neurología', 'Medicina Interna', 'Fisioterapia', 'Otra'];
 const FORM_VACIO = { doctor: '', especialidad: '', lugar: '', fecha: '', hora: '', pruebas_solicitadas: '', detalles: '' };
@@ -122,6 +122,7 @@ function CitaCard({ cita, onEditar, onEliminar }) {
 }
 
 export default function Citas() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [citas, setCitas] = useState([]);
   const [loading, setLoading] = useState(true);
