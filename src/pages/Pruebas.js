@@ -52,21 +52,28 @@ export default function Pruebas() {
     e.preventDefault();
     setGuardando(true);
     try {
-      let pdfData = {};
-      if (pdfLocal) {
-        const buffer = await pdfLocal.arrayBuffer();
+      const fecha = form.fecha ? form.fecha.replace(/-/g, '') : new Date().toISOString().slice(0,10).replace(/-/g,'');
+      const tipo = form.tipo || 'Prueba';
+      const subCarpeta = `${fecha}_${tipo}`;
+      const adjuntosData = [];
+      for (const file of adjuntos) {
+        const buffer = await file.arrayBuffer();
         if (driveConectado) {
-          const driveFile = await uploadPDFToDrive(pdfLocal.name, buffer);
-          pdfData = { pdf_drive_id: driveFile.id, pdf_nombre: driveFile.name, pdf_origen: 'drive' };
+          const driveFile = await uploadPDFToDrive(file.name, buffer, subCarpeta);
+          adjuntosData.push({ pdf_drive_id: driveFile.id, pdf_nombre: driveFile.name, pdf_origen: 'drive', pdf_tipo: file.type });
         } else {
-          const pdfId = `prueba_${user.uid}_${Date.now()}`;
-          await savePDF(pdfId, pdfLocal.name, buffer);
-          pdfData = { pdf_id: pdfId, pdf_nombre: pdfLocal.name, pdf_origen: 'local' };
+          const pdfId = `prueba_${user.uid}_${Date.now()}_${adjuntosData.length}`;
+          await savePDF(pdfId, file.name, buffer);
+          adjuntosData.push({ pdf_id: pdfId, pdf_nombre: file.name, pdf_origen: 'local', pdf_tipo: file.type });
         }
       }
-      await addDoc(collection(db, 'pruebas'), { uid: user.uid, ...form, ...pdfData, timestamp: serverTimestamp() });
+      await addDoc(collection(db, 'pruebas'), {
+        uid: user.uid, ...form, adjuntos: adjuntosData,
+        ...(adjuntosData.length > 0 ? { pdf_drive_id: adjuntosData[0].pdf_drive_id, pdf_id: adjuntosData[0].pdf_id, pdf_nombre: adjuntosData[0].pdf_nombre, pdf_origen: adjuntosData[0].pdf_origen, pdf_tipo: adjuntosData[0].pdf_tipo } : {}),
+        timestamp: serverTimestamp()
+      });
       setForm(FORM_VACIO);
-      setPdfLocal(null);
+      setAdjuntos([]);
       if (fileRef.current) fileRef.current.value = '';
       setMostrarForm(false);
       cargar();
@@ -178,13 +185,7 @@ export default function Pruebas() {
               </p>
               <input ref={fileRef} type="file" accept="application/pdf" onChange={onFileChange}
                 style={{ fontSize: 13, color: 'var(--slate-600)', width: '100%' }} />
-              {pdfLocal && (
-                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--teal-50)', border: '1px solid var(--teal-100)', borderRadius: 8, padding: '8px 12px' }}>
-                  <span style={{ fontSize: 12, color: 'var(--teal-700)', flex: 1 }}>{pdfLocal.name}</span>
-                  <button type="button" onClick={() => { setPdfLocal(null); if (fileRef.current) fileRef.current.value = ''; }}
-                    style={{ background: 'none', border: 'none', color: 'var(--teal-500)', cursor: 'pointer', fontSize: 16 }}>×</button>
-                </div>
-              )}
+
             </div>
             <button className="btn-primary" type="submit" disabled={guardando}>
               {guardando ? (driveConectado ? `Subiendo ${adjuntos.length} archivo(s)...` : 'Guardando...') : 'Guardar prueba'}
