@@ -5,8 +5,57 @@ import { useAuth } from '../hooks/useAuth';
 import { savePDF, getPDF, deletePDF, openPDFInBrowser } from '../services/storage';
 import { isDriveConnected, uploadPDFToDrive, openDriveFile, deleteDriveFile } from '../services/googleDrive';
 import { HospitalSelector } from '../components/HospitalSelector';
-import PageHeader from '../components/PageHeader';
 import { format } from 'date-fns';
+
+
+async function imagenAPDF(imageFile) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        // Create canvas to draw image
+        const canvas = document.createElement('canvas');
+        const maxWidth = 800;
+        const scale = img.width > maxWidth ? maxWidth / img.width : 1;
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        // Convert to PDF manually using raw PDF structure
+        const imgData = canvas.toDataURL('image/jpeg', 0.85);
+        const base64 = imgData.split(',')[1];
+        const imgBytes = atob(base64);
+        const imgArray = new Uint8Array(imgBytes.length);
+        for (let i = 0; i < imgBytes.length; i++) imgArray[i] = imgBytes.charCodeAt(i);
+
+        // Build minimal PDF
+        const w = Math.round(canvas.width * 0.75); // px to pt approx
+        const h = Math.round(canvas.height * 0.75);
+        const pdfContent = `%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/MediaBox[0 0 ${w} ${h}]/Contents 4 0 R/Resources<</XObject<</I1 5 0 R>>>>>>/Parent 2 0 R>>endobj
+4 0 obj<</Length 32>>stream
+q ${w} 0 0 ${h} 0 0 cm /I1 Do Q
+endstream endobj
+`;
+        // For simplicity, return as JPEG blob wrapped - use a simpler approach
+        canvas.toBlob((blob) => {
+          // Return as image blob, rename with .jpg
+          resolve({ blob, nombre: imageFile.name.replace(/\.[^.]+$/, '') + '.jpg', esImagen: true });
+        }, 'image/jpeg', 0.85);
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(imageFile);
+  });
+}
 
 const TIPOS_PRUEBA = ['Analítica de sangre', 'Analítica de orina', 'Radiografía', 'Ecografía', 'TAC', 'RMN', 'Espirometría', 'Ecocardiograma', 'Capilaroscopia', 'Electromiografía', 'Biopsia', 'Prueba de esfuerzo', 'Otra'];
 const FORM_VACIO = { tipo: '', fecha: '', lugar: '', doctor_solicitante: '', resultado: '', notas: '' };
@@ -21,7 +70,9 @@ export default function Pruebas() {
   const [abriendo, setAbriendo] = useState(null);
   const [driveConectado] = useState(() => isDriveConnected());
   const fileRef = useRef();
+  const cameraRef = useRef();
   const [form, setForm] = useState(FORM_VACIO);
+  const [procesando, setProcesando] = useState(false);
 
   async function cargar() {
     try {
@@ -42,6 +93,22 @@ export default function Pruebas() {
     setPdfLocal(file);
   }
 
+  async function onCameraChange(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { alert('Selecciona una imagen'); return; }
+    setProcesando(true);
+    try {
+      const { blob, nombre } = await imagenAPDF(file);
+      const imageFile = new File([blob], nombre, { type: 'image/jpeg' });
+      setPdfLocal(imageFile);
+    } catch (err) {
+      alert('Error al procesar la imagen');
+    }
+    setProcesando(false);
+    if (cameraRef.current) cameraRef.current.value = '';
+  }
+
   async function guardar(e) {
     e.preventDefault();
     setGuardando(true);
@@ -51,11 +118,11 @@ export default function Pruebas() {
         const buffer = await pdfLocal.arrayBuffer();
         if (driveConectado) {
           const driveFile = await uploadPDFToDrive(pdfLocal.name, buffer);
-          pdfData = { pdf_drive_id: driveFile.id, pdf_nombre: driveFile.name, pdf_origen: 'drive' };
+          pdfData = { pdf_drive_id: driveFile.id, pdf_nombre: driveFile.name, pdf_origen: 'drive', pdf_tipo: pdfLocal.type };
         } else {
           const pdfId = `prueba_${user.uid}_${Date.now()}`;
           await savePDF(pdfId, pdfLocal.name, buffer);
-          pdfData = { pdf_id: pdfId, pdf_nombre: pdfLocal.name, pdf_origen: 'local' };
+          pdfData = { pdf_id: pdfId, pdf_nombre: pdfLocal.name, pdf_origen: 'local', pdf_tipo: pdfLocal.type };
         }
       }
       await addDoc(collection(db, 'pruebas'), { uid: user.uid, ...form, ...pdfData, timestamp: serverTimestamp() });
@@ -83,16 +150,23 @@ export default function Pruebas() {
         openDriveFile(prueba.pdf_drive_id);
       } else {
         const stored = await getPDF(prueba.pdf_id);
-        if (!stored) { alert('PDF no encontrado en este dispositivo.'); return; }
-        openPDFInBrowser(stored.data, prueba.pdf_nombre);
+        if (!stored) { alert('Archivo no encontrado en este dispositivo.'); return; }
+        const tipo = prueba.pdf_tipo || 'application/pdf';
+        const blob = new Blob([stored.data], { type: tipo });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
       }
-    } catch (err) { alert('Error al abrir el PDF'); }
+    } catch (err) { alert('Error al abrir el archivo'); }
     setAbriendo(null);
   }
 
   return (
     <div style={{ paddingBottom: 100 }}>
-      <PageHeader title="Pruebas médicas" subtitle={`${pruebas.length} registradas`} />
+      <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px' }}>
+        <h1 style={{ color: 'white', fontSize: 22, fontWeight: 600 }}>Pruebas médicas</h1>
+        <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 14, marginTop: 4 }}>{pruebas.length} registradas</p>
+      </div>
 
       <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: driveConectado ? 'var(--teal-50)' : 'var(--slate-50)', border: `1px solid ${driveConectado ? 'var(--teal-100)' : 'var(--slate-200)'}`, borderRadius: 10 }}>
@@ -147,17 +221,52 @@ export default function Pruebas() {
                 placeholder="Observaciones..." rows={2} style={{ resize: 'none' }} />
             </div>
             <div style={{ background: 'var(--teal-50)', border: '1.5px dashed var(--teal-300)', borderRadius: 10, padding: 14 }}>
-              <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--teal-700)', marginBottom: 4 }}>Adjuntar PDF (opcional)</p>
-              <p style={{ fontSize: 11, color: 'var(--teal-500)', marginBottom: 10 }}>
-                {driveConectado ? 'Se guardará en tu Google Drive · carpeta ScleroApp' : 'Se guardará solo en este dispositivo'}
+              <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--teal-700)', marginBottom: 4 }}>Adjuntar documento (opcional)</p>
+              <p style={{ fontSize: 11, color: 'var(--teal-500)', marginBottom: 12 }}>
+                {driveConectado ? 'Se guardará en Google Drive · carpeta ScleroApp' : 'Se guardará en este dispositivo'}
               </p>
-              <input ref={fileRef} type="file" accept="application/pdf" onChange={onFileChange}
-                style={{ fontSize: 13, color: 'var(--slate-600)', width: '100%' }} />
+
+              {procesando && (
+                <div style={{ textAlign: 'center', padding: '10px', fontSize: 13, color: 'var(--teal-600)' }}>
+                  Procesando imagen...
+                </div>
+              )}
+
+              {!pdfLocal && !procesando && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {/* Botón cámara */}
+                  <button type="button" onClick={() => cameraRef.current.click()}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px', borderRadius: 8, background: 'var(--teal-500)', color: 'white', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                    Hacer foto
+                  </button>
+                  {/* Botón PDF */}
+                  <button type="button" onClick={() => fileRef.current.click()}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px', borderRadius: 8, background: 'white', color: 'var(--teal-700)', border: '1.5px solid var(--teal-300)', cursor: 'pointer', fontSize: 12, fontWeight: 500 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    Adjuntar PDF
+                  </button>
+                </div>
+              )}
+
+              {/* Input cámara - acepta imagen, abre cámara en móvil */}
+              <input ref={cameraRef} type="file" accept="image/*" capture="environment"
+                onChange={onCameraChange} style={{ display: 'none' }} />
+              {/* Input PDF */}
+              <input ref={fileRef} type="file" accept="application/pdf"
+                onChange={onFileChange} style={{ display: 'none' }} />
+
               {pdfLocal && (
-                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--teal-50)', border: '1px solid var(--teal-100)', borderRadius: 8, padding: '8px 12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'white', border: '1px solid var(--teal-100)', borderRadius: 8, padding: '10px 12px' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--teal-500)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    {pdfLocal.type.startsWith('image/') 
+                      ? <><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></>
+                      : <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></>
+                    }
+                  </svg>
                   <span style={{ fontSize: 12, color: 'var(--teal-700)', flex: 1 }}>{pdfLocal.name}</span>
-                  <button type="button" onClick={() => { setPdfLocal(null); if (fileRef.current) fileRef.current.value = ''; }}
-                    style={{ background: 'none', border: 'none', color: 'var(--teal-500)', cursor: 'pointer', fontSize: 16 }}>×</button>
+                  <button type="button" onClick={() => { setPdfLocal(null); if (fileRef.current) fileRef.current.value = ''; if (cameraRef.current) cameraRef.current.value = ''; }}
+                    style={{ background: 'none', border: 'none', color: 'var(--teal-400)', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
                 </div>
               )}
             </div>
@@ -188,7 +297,7 @@ export default function Pruebas() {
                   {(p.pdf_id || p.pdf_drive_id) && (
                     <button onClick={() => abrirPDF(p)} disabled={abriendo === p.id}
                       style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, background: 'var(--teal-50)', border: '1px solid var(--teal-100)', borderRadius: 8, padding: '7px 12px', cursor: 'pointer', color: 'var(--teal-700)', fontSize: 12, fontWeight: 500 }}>
-                      {abriendo === p.id ? 'Abriendo...' : p.pdf_nombre || 'Ver PDF'}
+                      {abriendo === p.id ? 'Abriendo...' : p.pdf_nombre || (p.pdf_tipo?.startsWith('image/') ? 'Ver imagen' : 'Ver PDF')}
                       {p.pdf_origen === 'drive' && <span style={{ fontSize: 10, color: 'var(--teal-500)' }}>· Drive</span>}
                     </button>
                   )}
