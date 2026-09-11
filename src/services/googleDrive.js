@@ -78,9 +78,10 @@ async function driveRequest(url, options = {}) {
   return resp;
 }
 
-async function getOrCreateFolder() {
+async function getOrCreateFolder(name, parentId = null) {
+  const parentQuery = parentId ? ` and '${parentId}' in parents` : '';
   const searchResp = await driveRequest(
-    `https://www.googleapis.com/drive/v3/files?q=name='${encodeURIComponent(FOLDER_NAME)}' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id,name)`
+    `https://www.googleapis.com/drive/v3/files?q=name='${encodeURIComponent(name)}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentQuery}&fields=files(id,name)`
   );
   const searchData = await searchResp.json();
 
@@ -88,19 +89,19 @@ async function getOrCreateFolder() {
     return searchData.files[0].id;
   }
 
+  const body = { name, mimeType: 'application/vnd.google-apps.folder' };
+  if (parentId) body.parents = [parentId];
+
   const createResp = await driveRequest('https://www.googleapis.com/drive/v3/files', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: FOLDER_NAME,
-      mimeType: 'application/vnd.google-apps.folder'
-    })
+    body: JSON.stringify(body)
   });
   const folder = await createResp.json();
   return folder.id;
 }
 
-export async function uploadPDFToDrive(fileName, arrayBuffer) {
+export async function uploadPDFToDrive(fileName, arrayBuffer, subFolderName = null) {
   if (!isDriveConnected()) {
     try {
       await connectDrive();
@@ -109,9 +110,16 @@ export async function uploadPDFToDrive(fileName, arrayBuffer) {
     }
   }
 
-  const folderId = await getOrCreateFolder();
+  // Get or create main folder
+  const mainFolderId = await getOrCreateFolder(FOLDER_NAME);
+
+  // Get or create subfolder if provided
+  const targetFolderId = subFolderName
+    ? await getOrCreateFolder(subFolderName, mainFolderId)
+    : mainFolderId;
+
   const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
-  const metadata = JSON.stringify({ name: fileName, parents: [folderId] });
+  const metadata = JSON.stringify({ name: fileName, parents: [targetFolderId] });
   const metaBlob = new Blob([metadata], { type: 'application/json' });
   const form = new FormData();
   form.append('metadata', metaBlob);
