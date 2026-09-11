@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { collection, addDoc, query, where, orderBy, getDocs, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../hooks/useAuth';
-import { savePDF, getPDF, deletePDF, openPDFInBrowser } from '../services/storage';
+import { useNavigate } from 'react-router-dom';
+import { savePDF, getPDF, deletePDF } from '../services/storage';
 import { isDriveConnected, uploadPDFToDrive, openDriveFile, deleteDriveFile } from '../services/googleDrive';
 import { HospitalSelector } from '../components/HospitalSelector';
 import { format } from 'date-fns';
@@ -10,16 +11,60 @@ import { format } from 'date-fns';
 const TIPOS_PRUEBA = ['Analítica de sangre', 'Analítica de orina', 'Radiografía', 'Ecografía', 'TAC', 'RMN', 'Espirometría', 'Ecocardiograma', 'Capilaroscopia', 'Electromiografía', 'Biopsia', 'Prueba de esfuerzo', 'Otra'];
 const FORM_VACIO = { tipo: '', fecha: '', lugar: '', doctor_solicitante: '', resultado: '', notas: '' };
 
+// Convert image to compressed JPEG blob
+function procesarImagen(imageFile) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxWidth = 1200;
+        const scale = img.width > maxWidth ? maxWidth / img.width : 1;
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(imageFile);
+  });
+}
+
+function buildNombre(form, adjuntos, ext) {
+  const fecha = form.fecha ? form.fecha.replace(/-/g, '') : format(new Date(), 'yyyyMMdd');
+  const tipo = form.tipo
+    ? form.tipo.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]/g, '').trim().replace(/ +/g, '_')
+    : 'prueba';
+  const num = adjuntos.length + 1;
+  return num > 1 ? `${fecha}_${tipo}_${num}.${ext}` : `${fecha}_${tipo}.${ext}`;
+}
+
+function buildSubcarpeta(form) {
+  const fecha = form.fecha ? form.fecha.replace(/-/g, '') : format(new Date(), 'yyyyMMdd');
+  const tipo = form.tipo || 'Prueba';
+  return `${fecha}_${tipo}`;
+}
+
 export default function Pruebas() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [pruebas, setPruebas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [mostrarForm, setMostrarForm] = useState(false);
   const [guardando, setGuardando] = useState(false);
-  const [adjuntos, setAdjuntos] = useState([]);  // array of files
+  const [procesando, setProcesando] = useState(false);
+  const [adjuntos, setAdjuntos] = useState([]);
   const [abriendo, setAbriendo] = useState(null);
   const [driveConectado] = useState(() => isDriveConnected());
   const fileRef = useRef();
+  const cameraRef = useRef();
   const [form, setForm] = useState(FORM_VACIO);
 
   async function cargar() {
@@ -38,28 +83,40 @@ export default function Pruebas() {
     if (!file) return;
     if (file.type !== 'application/pdf') { alert('Solo se admiten ficheros PDF'); return; }
     if (file.size > 20 * 1024 * 1024) { alert('El fichero no puede superar 20 MB'); return; }
-    // Build filename: fecha + tipo
-    const fecha = form.fecha ? form.fecha.replace(/-/g, '') : new Date().toISOString().slice(0,10).replace(/-/g,'');
-    const tipo = form.tipo ? form.tipo.replace(/[^\w\s]/g, '').trim().replace(/\s+/g, '_') : 'prueba';
-    const num = adjuntos.length + 1;
-    const nombre = num > 1 ? `${fecha}_${tipo}_${num}.pdf` : `${fecha}_${tipo}.pdf`;
+    const nombre = buildNombre(form, adjuntos, 'pdf');
     const namedFile = new File([file], nombre, { type: 'application/pdf' });
     setAdjuntos(prev => [...prev, namedFile]);
     if (fileRef.current) fileRef.current.value = '';
+  }
+
+  async function onCameraChange(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { alert('Selecciona una imagen'); return; }
+    setProcesando(true);
+    try {
+      const blob = await procesarImagen(file);
+      const nombre = buildNombre(form, adjuntos, 'jpg');
+      const imageFile = new File([blob], nombre, { type: 'image/jpeg' });
+      setAdjuntos(prev => [...prev, imageFile]);
+    } catch (err) {
+      alert('Error al procesar la imagen');
+    }
+    setProcesando(false);
+    if (cameraRef.current) cameraRef.current.value = '';
   }
 
   async function guardar(e) {
     e.preventDefault();
     setGuardando(true);
     try {
-      const fecha = form.fecha ? form.fecha.replace(/-/g, '') : new Date().toISOString().slice(0,10).replace(/-/g,'');
-      const tipo = form.tipo || 'Prueba';
-      const subCarpeta = `${fecha}_${tipo}`;
+      const subcarpeta = buildSubcarpeta(form);
       const adjuntosData = [];
+
       for (const file of adjuntos) {
         const buffer = await file.arrayBuffer();
         if (driveConectado) {
-          const driveFile = await uploadPDFToDrive(file.name, buffer, subCarpeta);
+          const driveFile = await uploadPDFToDrive(file.name, buffer, subcarpeta);
           adjuntosData.push({ pdf_drive_id: driveFile.id, pdf_nombre: driveFile.name, pdf_origen: 'drive', pdf_tipo: file.type });
         } else {
           const pdfId = `prueba_${user.uid}_${Date.now()}_${adjuntosData.length}`;
@@ -67,40 +124,34 @@ export default function Pruebas() {
           adjuntosData.push({ pdf_id: pdfId, pdf_nombre: file.name, pdf_origen: 'local', pdf_tipo: file.type });
         }
       }
+
       await addDoc(collection(db, 'pruebas'), {
-        uid: user.uid, ...form, adjuntos: adjuntosData,
-        ...(adjuntosData.length > 0 ? { pdf_drive_id: adjuntosData[0].pdf_drive_id, pdf_id: adjuntosData[0].pdf_id, pdf_nombre: adjuntosData[0].pdf_nombre, pdf_origen: adjuntosData[0].pdf_origen, pdf_tipo: adjuntosData[0].pdf_tipo } : {}),
+        uid: user.uid,
+        ...form,
+        adjuntos: adjuntosData,
         timestamp: serverTimestamp()
       });
+
       setForm(FORM_VACIO);
       setAdjuntos([]);
-      if (fileRef.current) fileRef.current.value = '';
       setMostrarForm(false);
       cargar();
-    } catch (err) { alert('Error al guardar: ' + err.message); }
+    } catch (err) {
+      alert('Error al guardar: ' + err.message);
+    }
     setGuardando(false);
   }
 
   async function eliminar(prueba) {
-    if (!window.confirm('¿Eliminar esta prueba?')) return;
-    if (prueba.pdf_origen === 'local' && prueba.pdf_id) await deletePDF(prueba.pdf_id);
-    if (prueba.pdf_origen === 'drive' && prueba.pdf_drive_id) await deleteDriveFile(prueba.pdf_drive_id);
+    if (!window.confirm('¿Eliminar esta prueba y todos sus documentos?')) return;
+    // Delete adjuntos
+    const lista = prueba.adjuntos || [];
+    for (const adj of lista) {
+      if (adj.pdf_origen === 'local') await deletePDF(adj.pdf_id).catch(() => {});
+      if (adj.pdf_origen === 'drive') await deleteDriveFile(adj.pdf_drive_id).catch(() => {});
+    }
     await deleteDoc(doc(db, 'pruebas', prueba.id));
     cargar();
-  }
-
-  async function abrirPDF(prueba) {
-    setAbriendo(prueba.id);
-    try {
-      if (prueba.pdf_origen === 'drive') {
-        openDriveFile(prueba.pdf_drive_id);
-      } else {
-        const stored = await getPDF(prueba.pdf_id);
-        if (!stored) { alert('PDF no encontrado en este dispositivo.'); return; }
-        openPDFInBrowser(stored.data, prueba.pdf_nombre);
-      }
-    } catch (err) { alert('Error al abrir el PDF'); }
-    setAbriendo(null);
   }
 
   async function abrirAdjunto(adj) {
@@ -110,8 +161,7 @@ export default function Pruebas() {
       } else {
         const stored = await getPDF(adj.pdf_id);
         if (!stored) { alert('Archivo no encontrado en este dispositivo.'); return; }
-        const tipo = adj.pdf_tipo || 'application/pdf';
-        const blob = new Blob([stored.data], { type: tipo });
+        const blob = new Blob([stored.data], { type: adj.pdf_tipo || 'application/pdf' });
         const url = URL.createObjectURL(blob);
         window.open(url, '_blank');
         setTimeout(() => URL.revokeObjectURL(url), 10000);
@@ -121,27 +171,34 @@ export default function Pruebas() {
 
   return (
     <div style={{ paddingBottom: 100 }}>
-      <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px' }}>
+      <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px', position: 'relative' }}>
+        <button onClick={() => navigate('/')}
+          style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, padding: '6px 12px', color: 'white', fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>
+          ← Inicio
+        </button>
         <h1 style={{ color: 'white', fontSize: 22, fontWeight: 600 }}>Pruebas médicas</h1>
         <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 14, marginTop: 4 }}>{pruebas.length} registradas</p>
       </div>
 
       <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+        {/* Estado Drive */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: driveConectado ? 'var(--teal-50)' : 'var(--slate-50)', border: `1px solid ${driveConectado ? 'var(--teal-100)' : 'var(--slate-200)'}`, borderRadius: 10 }}>
           <div style={{ width: 8, height: 8, borderRadius: '50%', background: driveConectado ? 'var(--teal-500)' : 'var(--slate-300)', flexShrink: 0 }} />
           <p style={{ fontSize: 12, color: driveConectado ? 'var(--teal-700)' : 'var(--slate-500)', flex: 1 }}>
-            {driveConectado ? 'PDFs se guardan en Google Drive' : 'PDFs se guardan en este dispositivo'}
+            {driveConectado ? 'Documentos guardados en Google Drive' : 'Documentos guardados en este dispositivo'}
           </p>
           {!driveConectado && <span style={{ fontSize: 11, color: 'var(--slate-400)' }}>Conecta en Configuración</span>}
         </div>
 
-        <button className="btn-primary" onClick={() => setMostrarForm(!mostrarForm)}>
+        <button className="btn-primary" onClick={() => { setMostrarForm(!mostrarForm); setAdjuntos([]); setForm(FORM_VACIO); }}>
           {mostrarForm ? 'Cancelar' : '+ Registrar prueba'}
         </button>
 
         {mostrarForm && (
           <form onSubmit={guardar} className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <p className="section-header">Nueva prueba</p>
+
             <div>
               <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Tipo de prueba</label>
               <select className="input-field" value={form.tipo}
@@ -151,46 +208,52 @@ export default function Pruebas() {
                 {TIPOS_PRUEBA.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
+
             <div>
               <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Fecha</label>
               <input className="input-field" type="date" value={form.fecha}
                 onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} required />
             </div>
+
             <div>
               <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Centro / Hospital</label>
               <HospitalSelector value={form.lugar} onChange={v => setForm(f => ({ ...f, lugar: v }))} />
             </div>
+
             <div>
               <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Doctor solicitante</label>
               <input className="input-field" value={form.doctor_solicitante}
                 onChange={e => setForm(f => ({ ...f, doctor_solicitante: e.target.value }))}
                 placeholder="Dra. Martínez" />
             </div>
+
             <div>
               <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Resultado / Valores</label>
               <textarea className="input-field" value={form.resultado}
                 onChange={e => setForm(f => ({ ...f, resultado: e.target.value }))}
                 placeholder="Resultados principales..." rows={3} style={{ resize: 'none' }} />
             </div>
+
             <div>
               <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Notas adicionales</label>
               <textarea className="input-field" value={form.notas}
                 onChange={e => setForm(f => ({ ...f, notas: e.target.value }))}
                 placeholder="Observaciones..." rows={2} style={{ resize: 'none' }} />
             </div>
+
+            {/* Adjuntos */}
             <div style={{ background: 'var(--teal-50)', border: '1.5px dashed var(--teal-300)', borderRadius: 10, padding: 14 }}>
               <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--teal-700)', marginBottom: 4 }}>
-                Documentos adjuntos {adjuntos.length > 0 && <span style={{ color: 'var(--teal-500)' }}>({adjuntos.length})</span>}
+                Documentos adjuntos {adjuntos.length > 0 && <span style={{ color: 'var(--teal-500)', fontWeight: 400 }}>({adjuntos.length})</span>}
               </p>
-              <p style={{ fontSize: 11, color: 'var(--teal-500)', marginBottom: 12 }}>
-                {driveConectado ? 'Se guardarán en Google Drive en una carpeta por prueba' : 'Se guardarán en este dispositivo'}
+              <p style={{ fontSize: 11, color: 'var(--teal-600)', marginBottom: 12 }}>
+                {driveConectado ? `Se guardarán en Drive → ScleroApp/${form.tipo || 'Prueba'}/` : 'Se guardarán en este dispositivo'}
               </p>
 
               {/* Botones siempre visibles */}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                <button type="button" onClick={() => cameraRef.current.click()}
-                  disabled={procesando}
-                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px', borderRadius: 8, background: 'var(--teal-500)', color: 'white', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500, opacity: procesando ? 0.6 : 1 }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: adjuntos.length > 0 ? 10 : 0 }}>
+                <button type="button" onClick={() => cameraRef.current.click()} disabled={procesando}
+                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px', borderRadius: 8, background: 'var(--teal-500)', color: 'white', border: 'none', cursor: procesando ? 'default' : 'pointer', fontSize: 12, fontWeight: 500, opacity: procesando ? 0.6 : 1 }}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
                     <circle cx="12" cy="13" r="4"/>
@@ -232,8 +295,11 @@ export default function Pruebas() {
                 </div>
               )}
             </div>
+
             <button className="btn-primary" type="submit" disabled={guardando}>
-              {guardando ? (driveConectado ? `Subiendo ${adjuntos.length} archivo(s)...` : 'Guardando...') : 'Guardar prueba'}
+              {guardando
+                ? (adjuntos.length > 0 ? `Subiendo ${adjuntos.length} archivo(s)...` : 'Guardando...')
+                : 'Guardar prueba'}
             </button>
           </form>
         )}
@@ -246,30 +312,54 @@ export default function Pruebas() {
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {pruebas.map(p => (
-            <div key={p.id} className="card" style={{ padding: '14px 16px', borderLeft: '3px solid var(--teal-500)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--slate-800)' }}>{p.tipo}</p>
-                  <p style={{ fontSize: 12, color: 'var(--slate-400)', marginTop: 3 }}>
-                    {p.fecha}{p.lugar ? ` · ${p.lugar}` : ''}{p.doctor_solicitante ? ` · ${p.doctor_solicitante}` : ''}
-                  </p>
-                  {p.resultado && <p style={{ fontSize: 13, color: 'var(--slate-600)', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--slate-100)' }}>{p.resultado}</p>}
-                  {p.notas && <p style={{ fontSize: 12, color: 'var(--slate-500)', marginTop: 4, fontStyle: 'italic' }}>{p.notas}</p>}
-                  {(p.pdf_id || p.pdf_drive_id) && (
-                    <button onClick={() => abrirPDF(p)} disabled={abriendo === p.id}
-                      style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, background: 'var(--teal-50)', border: '1px solid var(--teal-100)', borderRadius: 8, padding: '7px 12px', cursor: 'pointer', color: 'var(--teal-700)', fontSize: 12, fontWeight: 500 }}>
-                      {abriendo === p.id ? 'Abriendo...' : p.pdf_nombre || 'Ver PDF'}
-                      {p.pdf_origen === 'drive' && <span style={{ fontSize: 10, color: 'var(--teal-500)' }}>· Drive</span>}
-                    </button>
-                  )}
+          {pruebas.map(p => {
+            const listaAdj = p.adjuntos && p.adjuntos.length > 0 ? p.adjuntos : [];
+            return (
+              <div key={p.id} className="card" style={{ padding: '14px 16px', borderLeft: '3px solid var(--teal-500)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--slate-800)' }}>{p.tipo}</p>
+                    <p style={{ fontSize: 12, color: 'var(--slate-400)', marginTop: 3 }}>
+                      {p.fecha}{p.lugar ? ` · ${p.lugar}` : ''}{p.doctor_solicitante ? ` · ${p.doctor_solicitante}` : ''}
+                    </p>
+                    {p.resultado && (
+                      <p style={{ fontSize: 13, color: 'var(--slate-600)', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--slate-100)' }}>
+                        {p.resultado}
+                      </p>
+                    )}
+                    {p.notas && (
+                      <p style={{ fontSize: 12, color: 'var(--slate-500)', marginTop: 4, fontStyle: 'italic' }}>{p.notas}</p>
+                    )}
+
+                    {/* Adjuntos */}
+                    {listaAdj.length > 0 && (
+                      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {listaAdj.map((adj, idx) => (
+                          <button key={idx} onClick={() => abrirAdjunto(adj)} disabled={abriendo === p.id}
+                            style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--teal-50)', border: '1px solid var(--teal-100)', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', color: 'var(--teal-700)', fontSize: 11, fontWeight: 500 }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              {adj.pdf_tipo?.startsWith('image/')
+                                ? <><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></>
+                                : <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></>
+                              }
+                            </svg>
+                            {adj.pdf_nombre}
+                            {adj.pdf_origen === 'drive' && <span style={{ fontSize: 9, color: 'var(--teal-400)', marginLeft: 2 }}>Drive</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => eliminar(p)}
+                    style={{ background: 'none', border: 'none', color: 'var(--slate-300)', cursor: 'pointer', paddingLeft: 12, flexShrink: 0 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+                    </svg>
+                  </button>
                 </div>
-                <button onClick={() => eliminar(p)} style={{ background: 'none', border: 'none', color: 'var(--slate-300)', cursor: 'pointer', paddingLeft: 12, flexShrink: 0 }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
-                </button>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
