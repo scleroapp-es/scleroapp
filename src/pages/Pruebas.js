@@ -66,6 +66,8 @@ export default function Pruebas() {
   const fileRef = useRef();
   const cameraRef = useRef();
   const [form, setForm] = useState(FORM_VACIO);
+  const [filtros, setFiltros] = useState({ tipo: '', fechaDesde: '', fechaHasta: '', texto: '' });
+  const [mostrarFiltros, setMostrarFiltros] = useState(false);
 
   async function cargar() {
     try {
@@ -169,6 +171,29 @@ export default function Pruebas() {
     } catch (err) { alert('Error al abrir el archivo'); }
   }
 
+  // Apply filters
+  const pruebasFiltradas = pruebas.filter(p => {
+    if (filtros.tipo && p.tipo !== filtros.tipo) return false;
+    if (filtros.fechaDesde && p.fecha < filtros.fechaDesde) return false;
+    if (filtros.fechaHasta && p.fecha > filtros.fechaHasta) return false;
+    if (filtros.texto) {
+      const txt = filtros.texto.toLowerCase();
+      const hayMatch = (p.tipo || '').toLowerCase().includes(txt) ||
+        (p.doctor_solicitante || '').toLowerCase().includes(txt) ||
+        (p.lugar || '').toLowerCase().includes(txt) ||
+        (p.resultado || '').toLowerCase().includes(txt) ||
+        (p.notas || '').toLowerCase().includes(txt);
+      if (!hayMatch) return false;
+    }
+    return true;
+  });
+
+  const hayFiltros = filtros.tipo || filtros.fechaDesde || filtros.fechaHasta || filtros.texto;
+
+  function limpiarFiltros() {
+    setFiltros({ tipo: '', fechaDesde: '', fechaHasta: '', texto: '' });
+  }
+
   return (
     <div style={{ paddingBottom: 100 }}>
       <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px', position: 'relative' }}>
@@ -194,6 +219,74 @@ export default function Pruebas() {
         <button className="btn-primary" onClick={() => { setMostrarForm(!mostrarForm); setAdjuntos([]); setForm(FORM_VACIO); }}>
           {mostrarForm ? 'Cancelar' : '+ Registrar prueba'}
         </button>
+
+        {/* Barra de filtros */}
+        {!mostrarForm && (
+          <div className="card" style={{ padding: '12px 14px' }}>
+            {/* Búsqueda rápida */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div style={{ flex: 1, position: 'relative' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--slate-400)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input className="input-field" value={filtros.texto}
+                  onChange={e => setFiltros(f => ({ ...f, texto: e.target.value }))}
+                  placeholder="Buscar por tipo, doctor, resultado..."
+                  style={{ paddingLeft: 32, fontSize: 13 }} />
+              </div>
+              <button onClick={() => setMostrarFiltros(!mostrarFiltros)}
+                style={{ padding: '10px 12px', borderRadius: 8, fontSize: 12, fontWeight: 500, background: mostrarFiltros ? 'var(--teal-500)' : 'var(--slate-100)', color: mostrarFiltros ? 'white' : 'var(--slate-600)', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/>
+                </svg>
+                Filtros
+              </button>
+              {hayFiltros && (
+                <button onClick={limpiarFiltros}
+                  style={{ padding: '10px 12px', borderRadius: 8, fontSize: 12, background: 'var(--red-50)', color: 'var(--red-600)', border: '1px solid #fca5a5', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  × Limpiar
+                </button>
+              )}
+            </div>
+
+            {/* Filtros avanzados */}
+            {mostrarFiltros && (
+              <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 12, borderTop: '1px solid var(--slate-100)' }}>
+                <div>
+                  <label style={{ fontSize: 11, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Categoría de prueba</label>
+                  <select className="input-field" value={filtros.tipo}
+                    onChange={e => setFiltros(f => ({ ...f, tipo: e.target.value }))}
+                    style={{ appearance: 'none', fontSize: 13 }}>
+                    <option value="">Todas las categorías</option>
+                    {TIPOS_PRUEBA.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 11, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Fecha desde</label>
+                    <input className="input-field" type="date" value={filtros.fechaDesde}
+                      onChange={e => setFiltros(f => ({ ...f, fechaDesde: e.target.value }))}
+                      style={{ fontSize: 13 }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 11, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Fecha hasta</label>
+                    <input className="input-field" type="date" value={filtros.fechaHasta}
+                      onChange={e => setFiltros(f => ({ ...f, fechaHasta: e.target.value }))}
+                      style={{ fontSize: 13 }} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Resultado del filtro */}
+            {hayFiltros && (
+              <p style={{ fontSize: 11, color: 'var(--teal-600)', marginTop: 10 }}>
+                {pruebasFiltradas.length} resultado{pruebasFiltradas.length !== 1 ? 's' : ''} de {pruebas.length} pruebas
+              </p>
+            )}
+          </div>
+        )}
 
         {mostrarForm && (
           <form onSubmit={guardar} className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -310,9 +403,17 @@ export default function Pruebas() {
             <p style={{ fontSize: 15 }}>Sin pruebas registradas</p>
           </div>
         )}
+        {!loading && pruebas.length > 0 && pruebasFiltradas.length === 0 && !mostrarForm && (
+          <div style={{ textAlign: 'center', padding: '24px 20px', color: 'var(--slate-400)' }}>
+            <p style={{ fontSize: 14 }}>No hay pruebas que coincidan con los filtros</p>
+            <button onClick={limpiarFiltros} style={{ marginTop: 8, fontSize: 13, color: 'var(--teal-500)', background: 'none', border: 'none', cursor: 'pointer' }}>
+              Limpiar filtros
+            </button>
+          </div>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {pruebas.map(p => {
+          {pruebasFiltradas.map(p => {
             const listaAdj = p.adjuntos && p.adjuntos.length > 0 ? p.adjuntos : [];
             return (
               <div key={p.id} className="card" style={{ padding: '14px 16px', borderLeft: '3px solid var(--teal-500)' }}>
