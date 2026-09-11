@@ -2,13 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { collection, addDoc, query, where, orderBy, getDocs, deleteDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
 import { format, differenceInDays, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { HospitalSelector } from '../components/HospitalSelector';
-import { useNavigate } from 'react-router-dom';
 
 const ESPECIALIDADES = ['Reumatología', 'Cardiología', 'Neumología', 'Dermatología', 'Nefrología', 'Digestivo', 'Neurología', 'Medicina Interna', 'Fisioterapia', 'Otra'];
-const FORM_VACIO = { doctor: '', especialidad: '', lugar: '', fecha: '', hora: '', pruebas_solicitadas: '', detalles: '' };
+const FORM_VACIO = { tipo_cita: 'medica', nombre_prueba: '', doctor: '', especialidad: '', lugar: '', fecha: '', hora: '', pruebas_solicitadas: '', detalles: '' };
 
 function diasRestantes(fecha) {
   const diff = differenceInDays(parseISO(fecha), new Date());
@@ -17,38 +17,64 @@ function diasRestantes(fecha) {
   return `En ${diff} días`;
 }
 
-// ── Definido FUERA del componente principal para evitar pérdida de foco ──
 function FormCita({ form, setForm, onSubmit, onCancel, guardando, editando }) {
   return (
     <form onSubmit={onSubmit} className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <p className="section-header">{editando ? 'Editar cita' : 'Nueva cita'}</p>
+
+      {/* Tipo de cita */}
+      <div>
+        <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 8 }}>Tipo de cita</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[{ v: 'medica', l: 'Cita médica' }, { v: 'prueba', l: 'Cita para prueba' }].map(({ v, l }) => (
+            <button type="button" key={v} onClick={() => setForm(f => ({ ...f, tipo_cita: v }))}
+              style={{ flex: 1, padding: '10px', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer', border: `1.5px solid ${form.tipo_cita === v ? 'var(--teal-500)' : 'var(--slate-200)'}`, background: form.tipo_cita === v ? 'var(--teal-500)' : 'white', color: form.tipo_cita === v ? 'white' : 'var(--slate-600)', transition: 'all 0.15s' }}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Nombre de la prueba - solo si tipo es prueba */}
       {form.tipo_cita === 'prueba' && (
         <div>
           <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Nombre de la prueba</label>
           <input className="input-field" value={form.nombre_prueba}
             onChange={e => setForm(f => ({ ...f, nombre_prueba: e.target.value }))}
-            placeholder="Ej: Resonancia Magnética, Analítica de Sangre..." required={form.tipo_cita === 'prueba'} />
+            placeholder="Ej: Resonancia Magnética, Analítica de Sangre..."
+            required={form.tipo_cita === 'prueba'} />
         </div>
       )}
+
+      {/* Doctor */}
       <div>
-        <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>{form.tipo_cita === 'prueba' ? 'Doctor solicitante (opcional)' : 'Doctor / Doctora'}</label>
+        <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>
+          {form.tipo_cita === 'prueba' ? 'Doctor solicitante (opcional)' : 'Doctor / Doctora'}
+        </label>
         <input className="input-field" value={form.doctor}
           onChange={e => setForm(f => ({ ...f, doctor: e.target.value }))}
-          placeholder={form.tipo_cita === 'prueba' ? 'Dra. Martínez' : 'Dra. Martínez'} required={form.tipo_cita !== 'prueba'} />
+          placeholder="Dra. Martínez"
+          required={form.tipo_cita !== 'prueba'} />
       </div>
+
+      {/* Especialidad */}
       <div>
         <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Especialidad</label>
         <select className="input-field" value={form.especialidad}
           onChange={e => setForm(f => ({ ...f, especialidad: e.target.value }))}
-          required style={{ appearance: 'none' }}>
+          style={{ appearance: 'none' }}>
           <option value="">Seleccionar...</option>
           {ESPECIALIDADES.map(e => <option key={e} value={e}>{e}</option>)}
         </select>
       </div>
+
+      {/* Hospital */}
       <div>
         <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Centro / Hospital</label>
         <HospitalSelector value={form.lugar} onChange={v => setForm(f => ({ ...f, lugar: v }))} />
       </div>
+
+      {/* Fecha y hora */}
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}>
           <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Fecha</label>
@@ -61,18 +87,23 @@ function FormCita({ form, setForm, onSubmit, onCancel, guardando, editando }) {
             onChange={e => setForm(f => ({ ...f, hora: e.target.value }))} />
         </div>
       </div>
+
+      {/* Pruebas solicitadas */}
       <div>
         <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Pruebas solicitadas</label>
         <input className="input-field" value={form.pruebas_solicitadas}
           onChange={e => setForm(f => ({ ...f, pruebas_solicitadas: e.target.value }))}
           placeholder="Analítica completa, ECG..." />
       </div>
+
+      {/* Detalles */}
       <div>
         <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Detalles / Notas</label>
         <textarea className="input-field" value={form.detalles}
           onChange={e => setForm(f => ({ ...f, detalles: e.target.value }))}
           placeholder="Motivo de la consulta, lo que quiero preguntar..." rows={3} style={{ resize: 'none' }} />
       </div>
+
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="btn-primary" type="submit" disabled={guardando} style={{ flex: 1 }}>
           {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Guardar cita'}
@@ -87,19 +118,38 @@ function FormCita({ form, setForm, onSubmit, onCancel, guardando, editando }) {
 }
 
 function CitaCard({ cita, onEditar, onEliminar }) {
+  const navigate = useNavigate();
   const hoy = format(new Date(), 'yyyy-MM-dd');
   const pasada = cita.fecha < hoy;
+  const esPrueba = cita.tipo_cita === 'prueba';
+
   return (
-    <div className="card" style={{ padding: '14px 16px', borderLeft: `3px solid ${pasada ? 'var(--slate-200)' : 'var(--teal-500)'}`, opacity: pasada ? 0.85 : 1 }}>
+    <div className="card" style={{ padding: '14px 16px', borderLeft: `3px solid ${pasada ? 'var(--slate-200)' : esPrueba ? '#d97706' : 'var(--teal-500)'}`, opacity: pasada ? 0.85 : 1 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div style={{ flex: 1 }}>
-          <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--slate-800)' }}>{cita.doctor}</p>
-          <p style={{ fontSize: 13, color: 'var(--teal-600)', fontWeight: 500, marginTop: 2 }}>{cita.especialidad}</p>
+          {/* Badge tipo */}
+          <span style={{ display: 'inline-block', marginBottom: 6, fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 10, background: esPrueba ? '#faeeda' : 'var(--teal-50)', color: esPrueba ? '#854F0B' : 'var(--teal-700)', border: `1px solid ${esPrueba ? '#BA7517' : 'var(--teal-200)'}` }}>
+            {esPrueba ? 'Prueba médica' : 'Cita médica'}
+          </span>
+
+          {/* Título principal */}
+          <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--slate-800)' }}>
+            {esPrueba ? (cita.nombre_prueba || cita.doctor) : cita.doctor}
+          </p>
+
+          {/* Subtítulo */}
+          {esPrueba && cita.doctor && (
+            <p style={{ fontSize: 12, color: 'var(--slate-500)', marginTop: 1 }}>Dr/a: {cita.doctor}</p>
+          )}
+          {!esPrueba && cita.especialidad && (
+            <p style={{ fontSize: 13, color: 'var(--teal-600)', fontWeight: 500, marginTop: 2 }}>{cita.especialidad}</p>
+          )}
+
           <p style={{ fontSize: 12, color: 'var(--slate-400)', marginTop: 4 }}>
             {cita.fecha}{cita.hora ? ` · ${cita.hora}` : ''}{cita.lugar ? ` · ${cita.lugar}` : ''}
           </p>
           {!pasada && (
-            <span style={{ display: 'inline-block', marginTop: 6, fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 10, background: 'var(--teal-50)', color: 'var(--teal-700)', border: '1px solid var(--teal-100)' }}>
+            <span style={{ display: 'inline-block', marginTop: 6, fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 10, background: esPrueba ? '#faeeda' : 'var(--teal-50)', color: esPrueba ? '#854F0B' : 'var(--teal-700)', border: `1px solid ${esPrueba ? '#BA7517' : 'var(--teal-100)'}` }}>
               {diasRestantes(cita.fecha)}
             </span>
           )}
@@ -130,8 +180,8 @@ function CitaCard({ cita, onEditar, onEliminar }) {
 }
 
 export default function Citas() {
-  const navigate = useNavigate();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [citas, setCitas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -160,6 +210,8 @@ export default function Citas() {
   function abrirEditar(cita) {
     setEditando(cita.id);
     setForm({
+      tipo_cita: cita.tipo_cita || 'medica',
+      nombre_prueba: cita.nombre_prueba || '',
       doctor: cita.doctor || '',
       especialidad: cita.especialidad || '',
       lugar: cita.lugar || '',
@@ -204,10 +256,16 @@ export default function Citas() {
   const pasadas = citas.filter(c => c.fecha < hoy).sort((a, b) => b.fecha.localeCompare(a.fecha));
   const siguiente = proximas[0] || null;
 
+  const proximasMedicas = proximas.filter(c => c.tipo_cita !== 'prueba');
+  const proximasPruebas = proximas.filter(c => c.tipo_cita === 'prueba');
+
   return (
     <div style={{ paddingBottom: 100 }}>
       <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px', position: 'relative' }}>
-        <button onClick={() => navigate('/')} style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, padding: '6px 12px', color: 'white', fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>← Inicio</button>
+        <button onClick={() => navigate('/')}
+          style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, padding: '6px 12px', color: 'white', fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>
+          ← Inicio
+        </button>
         <h1 style={{ color: 'white', fontSize: 22, fontWeight: 600 }}>Citas médicas</h1>
         <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
           <div style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 10, padding: '8px 14px', textAlign: 'center' }}>
@@ -220,8 +278,10 @@ export default function Citas() {
           </div>
           {siguiente && (
             <div style={{ flex: 1, background: 'rgba(255,255,255,0.2)', borderRadius: 10, padding: '8px 14px' }}>
-              <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.8)', marginBottom: 2 }}>Próxima cita</p>
-              <p style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>{siguiente.doctor}</p>
+              <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.8)', marginBottom: 2 }}>Próxima</p>
+              <p style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>
+                {siguiente.tipo_cita === 'prueba' ? (siguiente.nombre_prueba || siguiente.doctor) : siguiente.doctor}
+              </p>
               <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)' }}>
                 {siguiente.fecha}{siguiente.hora ? ` · ${siguiente.hora}` : ''} · {diasRestantes(siguiente.fecha)}
               </p>
@@ -238,24 +298,31 @@ export default function Citas() {
 
         {loading && <p style={{ color: 'var(--slate-400)', textAlign: 'center', padding: 20 }}>Cargando...</p>}
 
-        {proximas.filter(c => c.tipo_cita !== 'prueba').length > 0 && (
+        {proximasMedicas.length > 0 && (
           <>
-            <p className="section-header">Citas médicas próximas</p>
-            {proximas.filter(c => c.tipo_cita !== 'prueba').map(c => <CitaCard key={c.id} cita={c} onEditar={abrirEditar} onEliminar={eliminar} />)}
+            <p className="section-header">Citas médicas próximas ({proximasMedicas.length})</p>
+            {proximasMedicas.map(c => <CitaCard key={c.id} cita={c} onEditar={abrirEditar} onEliminar={eliminar} />)}
           </>
         )}
-        {proximas.filter(c => c.tipo_cita === 'prueba').length > 0 && (
+
+        {proximasPruebas.length > 0 && (
           <>
-            <p className="section-header">Pruebas médicas próximas</p>
-            {proximas.filter(c => c.tipo_cita === 'prueba').map(c => <CitaCard key={c.id} cita={c} onEditar={abrirEditar} onEliminar={eliminar} />)}
+            <p className="section-header">Pruebas médicas próximas ({proximasPruebas.length})</p>
+            {proximasPruebas.map(c => <CitaCard key={c.id} cita={c} onEditar={abrirEditar} onEliminar={eliminar} />)}
           </>
+        )}
+
+        {proximas.length === 0 && !loading && (
+          <div style={{ textAlign: 'center', padding: '20px', color: 'var(--slate-400)' }}>
+            <p style={{ fontSize: 14 }}>Sin citas próximas</p>
+          </div>
         )}
 
         {pasadas.length > 0 && (
           <>
             <button onClick={() => setVerPasadas(!verPasadas)}
               style={{ background: 'none', border: 'none', textAlign: 'left', padding: '4px 0', fontSize: 13, color: 'var(--teal-500)', cursor: 'pointer', fontWeight: 500 }}>
-              {verPasadas ? '▾' : '▸'} Citas pasadas ({pasadas.length})
+              {verPasadas ? '▾' : '▸'} Historial de citas pasadas ({pasadas.length})
             </button>
             {verPasadas && pasadas.map(c => <CitaCard key={c.id} cita={c} onEditar={abrirEditar} onEliminar={eliminar} />)}
           </>
