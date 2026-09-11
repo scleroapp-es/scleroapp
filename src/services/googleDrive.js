@@ -1,4 +1,4 @@
-const CLIENT_ID = '339436983054-84m3ckulm3ud6hrp2jsbvm94la25jvru.apps.googleusercontent.com';
+const CLIENT_ID = '899843305477-0b577o8vjdib46n8qcnf7ms6m2320g16.apps.googleusercontent.com';
 const FOLDER_NAME = 'ScleroApp - Pruebas Médicas';
 const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 
@@ -35,7 +35,6 @@ export async function connectDrive() {
           reject(new Error(response.error_description || response.error));
           return;
         }
-        // Save token with expiry (tokens last 1 hour)
         localStorage.setItem('sclero_drive_token', response.access_token);
         localStorage.setItem('sclero_drive_expiry', String(Date.now() + (response.expires_in * 1000)));
         resolve(response.access_token);
@@ -64,6 +63,8 @@ async function driveRequest(url, options = {}) {
     clearDriveToken();
     throw new Error('Sesión de Drive expirada. Ve a Configuración y vuelve a conectar Drive.');
   }
+
+  if (resp.status === 204) return null;
 
   if (!resp.ok) {
     let errMsg = `Error ${resp.status}`;
@@ -101,7 +102,6 @@ async function getOrCreateFolder() {
 
 export async function uploadPDFToDrive(fileName, arrayBuffer) {
   if (!isDriveConnected()) {
-    // Try to reconnect silently first
     try {
       await connectDrive();
     } catch (e) {
@@ -111,10 +111,8 @@ export async function uploadPDFToDrive(fileName, arrayBuffer) {
 
   const folderId = await getOrCreateFolder();
   const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
-
   const metadata = JSON.stringify({ name: fileName, parents: [folderId] });
   const metaBlob = new Blob([metadata], { type: 'application/json' });
-
   const form = new FormData();
   form.append('metadata', metaBlob);
   form.append('file', blob);
