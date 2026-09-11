@@ -14,7 +14,8 @@ export default function Mas() {
 
   return (
     <div style={{ paddingBottom: 100 }}>
-      <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px' }}>
+      <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px', position: 'relative' }}>
+        <button onClick={() => navigate('/')} style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, padding: '6px 12px', color: 'white', fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>← Inicio</button>
         <h1 style={{ color: 'white', fontSize: 22, fontWeight: 600 }}>Más secciones</h1>
         <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13, marginTop: 4 }}>{user?.email}</p>
       </div>

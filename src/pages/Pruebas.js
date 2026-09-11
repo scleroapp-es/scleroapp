@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import { savePDF, getPDF, deletePDF, openPDFInBrowser } from '../services/storage';
 import { isDriveConnected, uploadPDFToDrive, openDriveFile, deleteDriveFile } from '../services/googleDrive';
 import { HospitalSelector } from '../components/HospitalSelector';
+import PageHeader from '../components/PageHeader';
 import { format } from 'date-fns';
 
 const TIPOS_PRUEBA = ['Analítica de sangre', 'Analítica de orina', 'Radiografía', 'Ecografía', 'TAC', 'RMN', 'Espirometría', 'Ecocardiograma', 'Capilaroscopia', 'Electromiografía', 'Biopsia', 'Prueba de esfuerzo', 'Otra'];
@@ -91,10 +92,7 @@ export default function Pruebas() {
 
   return (
     <div style={{ paddingBottom: 100 }}>
-      <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px' }}>
-        <h1 style={{ color: 'white', fontSize: 22, fontWeight: 600 }}>Pruebas médicas</h1>
-        <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 14, marginTop: 4 }}>{pruebas.length} registradas</p>
-      </div>
+      <PageHeader title="Pruebas médicas" subtitle={`${pruebas.length} registradas`} />
 
       <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: driveConectado ? 'var(--teal-50)' : 'var(--slate-50)', border: `1px solid ${driveConectado ? 'var(--teal-100)' : 'var(--slate-200)'}`, borderRadius: 10 }}>

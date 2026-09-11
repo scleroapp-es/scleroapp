@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { usePerfil } from '../hooks/usePerfil';
 import { hacerBackup, restaurarBackup, exportarExcel } from '../services/backup';
@@ -40,6 +41,7 @@ function ResultMsg({ msg }) {
 }
 
 export default function Configuracion() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { nombre, guardarNombre } = usePerfil();
   const [nombreEdit, setNombreEdit] = useState('');
@@ -182,7 +184,8 @@ export default function Configuracion() {
 
   return (
     <div style={{ paddingBottom: 100 }}>
-      <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px' }}>
+      <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px', position: 'relative' }}>
+        <button onClick={() => navigate('/')} style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, padding: '6px 12px', color: 'white', fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>← Inicio</button>
         <h1 style={{ color: 'white', fontSize: 22, fontWeight: 600 }}>Configuración</h1>
         <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13, marginTop: 4 }}>Perfil, ciclo y copias de seguridad</p>
       </div>

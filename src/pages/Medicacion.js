@@ -3,6 +3,7 @@ import { collection, addDoc, query, where, orderBy, getDocs, deleteDoc, doc, ser
 import { db } from '../firebase/config';
 import { useAuth } from '../hooks/useAuth';
 import { format } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 import { getOpcionesConfig } from '../services/opcionesExtra';
 
 const FARMACOS_DEFAULT = [
@@ -14,6 +15,7 @@ const FARMACOS_DEFAULT = [
 const MOMENTOS = ['Mañana', 'Mediodía', 'Tarde', 'Noche', 'Con el desayuno', 'Con la comida', 'Con la cena', 'En ayunas'];
 
 export default function Medicacion() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [registros, setRegistros] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +77,8 @@ export default function Medicacion() {
 
   return (
     <div style={{ paddingBottom: 100 }}>
-      <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px' }}>
+      <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px', position: 'relative' }}>
+        <button onClick={() => navigate('/')} style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, padding: '6px 12px', color: 'white', fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>← Inicio</button>
         <h1 style={{ color: 'white', fontSize: 22, fontWeight: 600 }}>Medicación</h1>
         <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 14, marginTop: 4 }}>{hoy.length} tomas registradas hoy</p>
       </div>

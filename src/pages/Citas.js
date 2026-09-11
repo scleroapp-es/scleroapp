@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth';
 import { format, differenceInDays, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { HospitalSelector } from '../components/HospitalSelector';
+import { useNavigate as useNav } from 'react-router-dom';
 
 const ESPECIALIDADES = ['Reumatología', 'Cardiología', 'Neumología', 'Dermatología', 'Nefrología', 'Digestivo', 'Neurología', 'Medicina Interna', 'Fisioterapia', 'Otra'];
 const FORM_VACIO = { doctor: '', especialidad: '', lugar: '', fecha: '', hora: '', pruebas_solicitadas: '', detalles: '' };
@@ -196,7 +197,8 @@ export default function Citas() {
 
   return (
     <div style={{ paddingBottom: 100 }}>
-      <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px' }}>
+      <div style={{ background: 'var(--teal-500)', padding: '48px 20px 24px', position: 'relative' }}>
+        <button onClick={() => navigate('/')} style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, padding: '6px 12px', color: 'white', fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>← Inicio</button>
         <h1 style={{ color: 'white', fontSize: 22, fontWeight: 600 }}>Citas médicas</h1>
         <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
           <div style={{ background: 'rgba(255,255,255,0.2)', borderRadius: 10, padding: '8px 14px', textAlign: 'center' }}>
