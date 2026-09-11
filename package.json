@@ -2,7 +2,7 @@
   "name": "mi-salud",
   "version": "1.0.0",
   "private": true,
-  "homepage": "https://juancarlosperez2005-spec.github.io/scleroapp7",
+  "homepage": "https://scleroapp-es.github.io/scleroapp",
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
