@@ -8,7 +8,7 @@ import { HospitalSelector } from '../components/HospitalSelector';
 import { useNavigate } from 'react-router-dom';
 
 const ESPECIALIDADES = ['Reumatología', 'Cardiología', 'Neumología', 'Dermatología', 'Nefrología', 'Digestivo', 'Neurología', 'Medicina Interna', 'Fisioterapia', 'Otra'];
-const FORM_VACIO = { tipo_cita: 'medica', doctor: '', especialidad: '', lugar: '', fecha: '', hora: '', pruebas_solicitadas: '', detalles: '' };
+const FORM_VACIO = { doctor: '', especialidad: '', lugar: '', fecha: '', hora: '', pruebas_solicitadas: '', detalles: '' };
 
 function diasRestantes(fecha) {
   const diff = differenceInDays(parseISO(fecha), new Date());
@@ -22,22 +22,19 @@ function FormCita({ form, setForm, onSubmit, onCancel, guardando, editando }) {
   return (
     <form onSubmit={onSubmit} className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <p className="section-header">{editando ? 'Editar cita' : 'Nueva cita'}</p>
-      <div>
-        <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 8 }}>Tipo de cita</label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {[{v:'medica',l:'Cita médica'},{v:'prueba',l:'Cita para prueba'}].map(({v,l}) => (
-            <button type="button" key={v} onClick={() => setForm(f => ({ ...f, tipo_cita: v }))}
-              style={{ flex: 1, padding: '10px', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer', border: `1.5px solid ${form.tipo_cita === v ? 'var(--teal-500)' : 'var(--slate-200)'}`, background: form.tipo_cita === v ? 'var(--teal-500)' : 'white', color: form.tipo_cita === v ? 'white' : 'var(--slate-600)', transition: 'all 0.15s' }}>
-              {l}
-            </button>
-          ))}
+      {form.tipo_cita === 'prueba' && (
+        <div>
+          <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Nombre de la prueba</label>
+          <input className="input-field" value={form.nombre_prueba}
+            onChange={e => setForm(f => ({ ...f, nombre_prueba: e.target.value }))}
+            placeholder="Ej: Resonancia Magnética, Analítica de Sangre..." required={form.tipo_cita === 'prueba'} />
         </div>
-      </div>
+      )}
       <div>
-        <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Doctor / Doctora</label>
+        <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>{form.tipo_cita === 'prueba' ? 'Doctor solicitante (opcional)' : 'Doctor / Doctora'}</label>
         <input className="input-field" value={form.doctor}
           onChange={e => setForm(f => ({ ...f, doctor: e.target.value }))}
-          placeholder="Dra. Martínez" required />
+          placeholder={form.tipo_cita === 'prueba' ? 'Dra. Martínez' : 'Dra. Martínez'} required={form.tipo_cita !== 'prueba'} />
       </div>
       <div>
         <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Especialidad</label>
@@ -96,11 +93,6 @@ function CitaCard({ cita, onEditar, onEliminar }) {
     <div className="card" style={{ padding: '14px 16px', borderLeft: `3px solid ${pasada ? 'var(--slate-200)' : 'var(--teal-500)'}`, opacity: pasada ? 0.85 : 1 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-            <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 10, background: cita.tipo_cita === 'prueba' ? '#faeeda' : 'var(--teal-50)', color: cita.tipo_cita === 'prueba' ? '#854F0B' : 'var(--teal-700)', border: `1px solid ${cita.tipo_cita === 'prueba' ? '#BA7517' : 'var(--teal-200)'}` }}>
-              {cita.tipo_cita === 'prueba' ? 'Prueba médica' : 'Cita médica'}
-            </span>
-          </div>
           <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--slate-800)' }}>{cita.doctor}</p>
           <p style={{ fontSize: 13, color: 'var(--teal-600)', fontWeight: 500, marginTop: 2 }}>{cita.especialidad}</p>
           <p style={{ fontSize: 12, color: 'var(--slate-400)', marginTop: 4 }}>

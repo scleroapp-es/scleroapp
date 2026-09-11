@@ -173,8 +173,8 @@ export default function Home() {
                   <span style={{ fontSize: 9, color: '#BA7517', textTransform: 'uppercase' }}>{c.fecha ? format(parseISO(c.fecha), 'MMM', { locale: es }) : ''}</span>
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--teal-800)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.doctor}</p>
-                  <p style={{ fontSize: 11, color: '#BA7517', marginTop: 1 }}>{c.especialidad}</p>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--teal-800)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.nombre_prueba || c.doctor}</p>
+                  {c.doctor && c.nombre_prueba && <p style={{ fontSize: 11, color: '#BA7517', marginTop: 1 }}>Dr/a: {c.doctor}</p>}
                   {(c.lugar || c.hora) && <p style={{ fontSize: 11, color: 'var(--slate-400)', marginTop: 1 }}>{[c.lugar, c.hora].filter(Boolean).join(' · ')}</p>}
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 500, padding: '3px 8px', borderRadius: 10, background: '#faeeda', color: '#854F0B', border: '1px solid #BA7517', flexShrink: 0 }}>{diasRestantes(c.fecha)}</span>
