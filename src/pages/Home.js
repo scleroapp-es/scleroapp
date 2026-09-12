@@ -43,7 +43,6 @@ export default function Home() {
   const { nombre } = usePerfil();
   const navigate = useNavigate();
   const [cuestionarioHoy, setCuestionarioHoy] = useState({ manana: false, noche: false });
-  const [tratamientoHoy, setTratamientoHoy] = useState({});
   const [proximasCitas, setProximasCitas] = useState([]);
   const [proximasPruebas, setProximasPruebas] = useState([]);
   const [diasCiclo, setDiasCiclo] = useState(null);
@@ -77,23 +76,6 @@ export default function Home() {
         const pasadas = todasPruebas.filter(p => p.fecha < fechaHoy);
         const listaPruebas = [...futuras, ...pasadas].slice(0, 2);
         setProximasPruebas(listaPruebas);
-        // Tratamientos de hoy
-        try {
-          const qTrat = query(collection(db, 'tratamientos'), where('uid', '==', user.uid));
-          const snapTrat = await getDocs(qTrat);
-          const todos = snapTrat.docs.map(d => d.data());
-          const diaHoy = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
-          const MOMENTOS_ORDER = ['Mañana','Con el desayuno','30 min antes del desayuno','En ayunas','Mediodía','Con la comida','30 min antes de la comida','Tarde','Noche','Con la cena','30 min antes de la cena','Al acostarse'];
-          const grupos = {};
-          for (const t of todos.filter(t => t.activo !== false && t.dias?.includes(diaHoy))) {
-            for (const m of (t.momentos || [])) {
-              if (!grupos[m]) grupos[m] = [];
-              grupos[m].push(t);
-            }
-          }
-          setTratamientoHoy(grupos);
-        } catch (e) {}
-
         // Ciclo menstrual
         try {
           const qMens = query(collection(db, 'menstruacion'), where('uid', '==', user.uid), orderBy('fecha_inicio', 'desc'), limit(1));
@@ -168,26 +150,54 @@ export default function Home() {
           </button>
         )}
 
-        {/* 1. Próximas citas */}
-        <SectionCard title="Próximas citas" to="/citas"
-          icon={<svg {...i16}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}>
-          {proximasCitas.length === 0 ? (
+        {/* 1. Citas médicas próximas */}
+        {proximasCitas.filter(c => c.tipo_cita !== 'prueba').length > 0 && (
+          <SectionCard title="Citas médicas" to="/citas"
+            icon={<svg {...i16}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}>
+            {proximasCitas.filter(c => c.tipo_cita !== 'prueba').slice(0,2).map((c, i, arr) => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--teal-50)' : 'none' }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--teal-50)', border: '1px solid var(--teal-100)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--teal-700)', lineHeight: 1 }}>{c.fecha?.slice(8)}</span>
+                  <span style={{ fontSize: 9, color: 'var(--teal-500)', textTransform: 'uppercase' }}>{c.fecha ? format(parseISO(c.fecha), 'MMM', { locale: es }) : ''}</span>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--teal-800)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.doctor}</p>
+                  <p style={{ fontSize: 11, color: 'var(--teal-600)', marginTop: 1 }}>{c.especialidad}</p>
+                  {(c.lugar || c.hora) && <p style={{ fontSize: 11, color: 'var(--slate-400)', marginTop: 1 }}>{[c.lugar, c.hora].filter(Boolean).join(' · ')}</p>}
+                </div>
+                <span style={{ fontSize: 10, fontWeight: 500, padding: '3px 8px', borderRadius: 10, background: 'var(--teal-50)', color: 'var(--teal-700)', border: '1px solid var(--teal-100)', flexShrink: 0 }}>{diasRestantes(c.fecha)}</span>
+              </div>
+            ))}
+          </SectionCard>
+        )}
+
+        {/* 1b. Citas para prueba próximas */}
+        {proximasCitas.filter(c => c.tipo_cita === 'prueba').length > 0 && (
+          <SectionCard title="Pruebas médicas programadas" to="/citas"
+            icon={<svg {...i16}><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v11m0 0a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2m-6 0V9m6 5V9"/></svg>}>
+            {proximasCitas.filter(c => c.tipo_cita === 'prueba').slice(0,2).map((c, i, arr) => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--teal-50)' : 'none' }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: '#faeeda', border: '1px solid #BA7517', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: '#854F0B', lineHeight: 1 }}>{c.fecha?.slice(8)}</span>
+                  <span style={{ fontSize: 9, color: '#BA7517', textTransform: 'uppercase' }}>{c.fecha ? format(parseISO(c.fecha), 'MMM', { locale: es }) : ''}</span>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--teal-800)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.nombre_prueba || c.doctor}</p>
+                  {c.doctor && c.nombre_prueba && <p style={{ fontSize: 11, color: '#BA7517', marginTop: 1 }}>Dr/a: {c.doctor}</p>}
+                  {(c.lugar || c.hora) && <p style={{ fontSize: 11, color: 'var(--slate-400)', marginTop: 1 }}>{[c.lugar, c.hora].filter(Boolean).join(' · ')}</p>}
+                </div>
+                <span style={{ fontSize: 10, fontWeight: 500, padding: '3px 8px', borderRadius: 10, background: '#faeeda', color: '#854F0B', border: '1px solid #BA7517', flexShrink: 0 }}>{diasRestantes(c.fecha)}</span>
+              </div>
+            ))}
+          </SectionCard>
+        )}
+
+        {proximasCitas.length === 0 && (
+          <SectionCard title="Próximas citas" to="/citas"
+            icon={<svg {...i16}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}>
             <p style={{ fontSize: 13, color: 'var(--slate-400)', textAlign: 'center', padding: '8px 0' }}>Sin citas próximas</p>
-          ) : proximasCitas.map((c, i) => (
-            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < proximasCitas.length - 1 ? '1px solid var(--teal-50)' : 'none' }}>
-              <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--teal-50)', border: '1px solid var(--teal-100)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--teal-700)', lineHeight: 1 }}>{c.fecha?.slice(8)}</span>
-                <span style={{ fontSize: 9, color: 'var(--teal-500)', textTransform: 'uppercase' }}>{c.fecha ? format(parseISO(c.fecha), 'MMM', { locale: es }) : ''}</span>
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--teal-800)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.doctor}</p>
-                <p style={{ fontSize: 11, color: 'var(--teal-600)', marginTop: 1 }}>{c.especialidad}</p>
-                {(c.lugar || c.hora) && <p style={{ fontSize: 11, color: 'var(--slate-400)', marginTop: 1 }}>{[c.lugar, c.hora].filter(Boolean).join(' · ')}</p>}
-              </div>
-              <span style={{ fontSize: 10, fontWeight: 500, padding: '3px 8px', borderRadius: 10, background: 'var(--teal-50)', color: 'var(--teal-700)', border: '1px solid var(--teal-100)', flexShrink: 0 }}>{diasRestantes(c.fecha)}</span>
-            </div>
-          ))}
-        </SectionCard>
+          </SectionCard>
+        )}
 
         {/* 2. Pruebas médicas */}
         <SectionCard title="Pruebas médicas" to="/pruebas"
@@ -208,29 +218,6 @@ export default function Home() {
             </div>
           ))}
         </SectionCard>
-
-        {/* 2.5 Tratamiento de hoy */}
-        {Object.keys(tratamientoHoy).length > 0 && (
-          <SectionCard title="Tratamiento de hoy" to="/medicacion"
-            icon={<svg {...i16}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {['Mañana','Con el desayuno','30 min antes del desayuno','En ayunas','Mediodía','Con la comida','30 min antes de la comida','Tarde','Noche','Con la cena','30 min antes de la cena','Al acostarse']
-                .filter(m => tratamientoHoy[m]?.length > 0)
-                .map(m => (
-                  <div key={m} style={{ paddingBottom: 6, borderBottom: '1px solid var(--teal-50)' }}>
-                    <p style={{ fontSize: 10, fontWeight: 600, color: 'var(--teal-500)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{m}</p>
-                    {tratamientoHoy[m].map((t, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--teal-400)', flexShrink: 0 }} />
-                        <span style={{ fontSize: 12, color: 'var(--slate-800)', fontWeight: 500 }}>{t.farmaco}</span>
-                        {t.dosis && <span style={{ fontSize: 11, color: 'var(--slate-400)' }}>· {t.dosis}</span>}
-                      </div>
-                    ))}
-                  </div>
-                ))}
-            </div>
-          </SectionCard>
-        )}
 
         {/* 3. Cuestionarios del día */}
         <SectionCard title="Cuestionarios de hoy" to="/cuestionarios"
