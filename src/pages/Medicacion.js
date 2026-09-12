@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, query, where, getDocs, deleteDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, deleteDoc, doc, updateDoc, serverTimestamp, orderBy } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
@@ -176,11 +176,46 @@ export default function Medicacion() {
   const [form, setForm] = useState(FORM_VACIO);
   const [farmacos, setFarmacos] = useState(FARMACOS_DEFAULT);
   const [verInactivos, setVerInactivos] = useState(false);
+  const [tomasHoy, setTomasHoy] = useState([]);
+  const [registrando, setRegistrando] = useState(null);
   const [mostrarExport, setMostrarExport] = useState(false);
   const [exportDesde, setExportDesde] = useState('');
   const [exportHasta, setExportHasta] = useState('');
   const [exportando, setExportando] = useState(false);
   const [exportMsg, setExportMsg] = useState('');
+
+  async function cargarTomasHoy() {
+    const hoyStr = format(new Date(), 'yyyy-MM-dd');
+    try {
+      const q = query(collection(db, 'tomas'), where('uid', '==', user.uid), where('fecha', '==', hoyStr));
+      const snap = await getDocs(q);
+      setTomasHoy(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (e) {}
+  }
+
+  async function registrarToma(tratamiento, momento) {
+    const key = `${tratamiento.farmaco}_${momento}`;
+    setRegistrando(key);
+    try {
+      const hoyStr = format(new Date(), 'yyyy-MM-dd');
+      const horaStr = format(new Date(), 'HH:mm');
+      await addDoc(collection(db, 'tomas'), {
+        uid: user.uid,
+        fecha: hoyStr,
+        hora: horaStr,
+        farmaco: tratamiento.farmaco,
+        dosis: tratamiento.dosis || '',
+        momento,
+        timestamp: serverTimestamp(),
+      });
+      cargarTomasHoy();
+    } catch (e) {}
+    setRegistrando(null);
+  }
+
+  function tomadaHoy(farmaco, momento) {
+    return tomasHoy.some(t => t.farmaco === farmaco && t.momento === momento);
+  }
 
   async function cargar() {
     try {
@@ -198,7 +233,7 @@ export default function Medicacion() {
     setFarmacos([...FARMACOS_DEFAULT, ...extras].filter(f => !ocultos.includes(f)));
   }
 
-  useEffect(() => { cargar(); cargarFarmacos(); }, []);
+  useEffect(() => { cargar(); cargarFarmacos(); cargarTomasHoy(); }, []);
 
   function abrirNuevo() {
     setEditando(null);
@@ -339,13 +374,22 @@ export default function Medicacion() {
                 {momentosDeHoy.map(m => (
                   <div key={m}>
                     <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal-500)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{m}</p>
-                    {grupos[m].map((t, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--teal-50)' }}>
-                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--teal-500)', flexShrink: 0 }} />
-                        <span style={{ fontSize: 13, color: 'var(--slate-800)', fontWeight: 500 }}>{t.farmaco}</span>
-                        {t.dosis && <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>· {t.dosis}</span>}
-                      </div>
-                    ))}
+                    {grupos[m].map((t, i) => {
+                      const yaRegistrada = tomadaHoy(t.farmaco, m);
+                      const key = `${t.farmaco}_${m}`;
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--teal-50)' }}>
+                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: yaRegistrada ? '#22c55e' : 'var(--teal-500)', flexShrink: 0 }} />
+                          <span style={{ fontSize: 13, color: 'var(--slate-800)', fontWeight: 500, flex: 1 }}>{t.farmaco}</span>
+                          {t.dosis && <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>· {t.dosis}</span>}
+                          <button type="button" onClick={() => !yaRegistrada && registrarToma(t, m)}
+                            disabled={yaRegistrada || registrando === key}
+                            style={{ fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 8, border: 'none', cursor: yaRegistrada ? 'default' : 'pointer', background: yaRegistrada ? '#f0fdf4' : 'var(--teal-500)', color: yaRegistrada ? '#16a34a' : 'white', flexShrink: 0 }}>
+                            {yaRegistrada ? '✓ Tomada' : registrando === key ? '...' : 'Registrar'}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 ))}
               </div>

@@ -1,74 +1,26 @@
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase/config';
 
-const DIAS_NOMBRES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-
-function getDiaIndex(date) {
-  const d = date.getDay(); // 0=Sun
-  return d === 0 ? 6 : d - 1; // Mon=0 ... Sun=6
-}
-
-function dateRange(desde, hasta) {
-  const dates = [];
-  const current = new Date(desde);
-  const end = new Date(hasta);
-  while (current <= end) {
-    dates.push(new Date(current));
-    current.setDate(current.getDate() + 1);
-  }
-  return dates;
-}
-
-function formatDate(date) {
-  return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-export async function generarHistoricoTomas(uid, nombrePaciente, fechaDesde, fechaHasta) {
-  // Load treatments
-  const q = query(collection(db, 'tratamientos'), where('uid', '==', uid));
-  const snap = await getDocs(q);
-  const tratamientos = snap.docs.map(d => d.data());
-
-  if (tratamientos.length === 0) throw new Error('No hay tratamientos definidos.');
-
-  // Generate all expected doses in range
-  const fechas = dateRange(fechaDesde, fechaHasta);
-  const filas = [];
-
-  for (const fecha of fechas) {
-    const diaIdx = getDiaIndex(fecha);
-    const diaNombre = DIAS_NOMBRES[diaIdx];
-    const fechaStr = formatDate(fecha);
-
-    for (const t of tratamientos) {
-      if (!t.dias?.includes(diaIdx)) continue;
-      if (t.activo === false) continue; // skip inactive
-
-      for (const momento of (t.momentos || [])) {
-        filas.push({
-          fecha: fechaStr,
-          dia: diaNombre,
-          medicamento: t.farmaco,
-          dosis: t.dosis || '—',
-          momento,
-          notas: t.notas || '',
-        });
-      }
-    }
-  }
-
-  if (filas.length === 0) throw new Error('No hay tomas previstas en ese rango de fechas con los tratamientos activos.');
-
-  return { filas, total: filas.length };
-}
-
 export async function exportarExcelTomas(uid, nombrePaciente, fechaDesde, fechaHasta) {
-  const { filas } = await generarHistoricoTomas(uid, nombrePaciente, fechaDesde, fechaHasta);
+  const desdeStr = fechaDesde.toISOString().slice(0,10);
+  const hastaStr = fechaHasta.toISOString().slice(0,10);
 
-  const headers = ['Fecha', 'Día', 'Medicamento', 'Dosis', 'Momento', 'Notas'];
+  const q = query(
+    collection(db, 'tomas'),
+    where('uid', '==', uid),
+    where('fecha', '>=', desdeStr),
+    where('fecha', '<=', hastaStr),
+    orderBy('fecha', 'asc')
+  );
+  const snap = await getDocs(q);
+  const tomas = snap.docs.map(d => d.data());
+
+  if (tomas.length === 0) throw new Error('No hay tomas registradas en ese rango de fechas.');
+
+  const headers = ['Fecha', 'Hora', 'Medicamento', 'Dosis', 'Momento'];
   const csvRows = [
     headers.join(';'),
-    ...filas.map(f => [f.fecha, f.dia, f.medicamento, f.dosis, f.momento, f.notas].join(';'))
+    ...tomas.map(t => [t.fecha, t.hora || '', t.farmaco, t.dosis || '', t.momento || ''].join(';'))
   ];
 
   const csvContent = '\uFEFF' + csvRows.join('\n');
@@ -81,34 +33,47 @@ export async function exportarExcelTomas(uid, nombrePaciente, fechaDesde, fechaH
   a.download = `ScleroApp_Medicacion_${desde}_${hasta}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
-  return filas.length;
+  return tomas.length;
 }
 
 export async function exportarPDFTomas(uid, nombrePaciente, fechaDesde, fechaHasta) {
-  const { filas } = await generarHistoricoTomas(uid, nombrePaciente, fechaDesde, fechaHasta);
+  const desdeStr = fechaDesde.toISOString().slice(0,10);
+  const hastaStr = fechaHasta.toISOString().slice(0,10);
+
+  const q = query(
+    collection(db, 'tomas'),
+    where('uid', '==', uid),
+    where('fecha', '>=', desdeStr),
+    where('fecha', '<=', hastaStr),
+    orderBy('fecha', 'asc')
+  );
+  const snap = await getDocs(q);
+  const tomas = snap.docs.map(d => d.data());
+
+  if (tomas.length === 0) throw new Error('No hay tomas registradas en ese rango de fechas.');
 
   const desde = fechaDesde.toLocaleDateString('es-ES');
   const hasta = fechaHasta.toLocaleDateString('es-ES');
   const hoy = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' });
 
-  // Group by date for cleaner display
+  // Group by date
   const porFecha = {};
-  for (const f of filas) {
-    if (!porFecha[f.fecha]) porFecha[f.fecha] = { dia: f.dia, tomas: [] };
-    porFecha[f.fecha].tomas.push(f);
+  for (const t of tomas) {
+    if (!porFecha[t.fecha]) porFecha[t.fecha] = [];
+    porFecha[t.fecha].push(t);
   }
 
-  const rowsHTML = Object.entries(porFecha).map(([fecha, { dia, tomas }]) => {
-    return tomas.map((t, i) => `
+  const rowsHTML = Object.entries(porFecha).map(([fecha, filas]) =>
+    filas.map((t, i) => `
       <tr>
-        ${i === 0 ? `<td rowspan="${tomas.length}" style="background:#f0fdf4;font-weight:600;vertical-align:middle">${fecha}<br><span style="font-size:11px;color:#059669;font-weight:400">${dia}</span></td>` : ''}
-        <td style="font-weight:500">${t.medicamento}</td>
-        <td>${t.dosis}</td>
-        <td><span style="background:#e6f4f1;color:#0f766e;padding:2px 8px;border-radius:10px;font-size:11px">${t.momento}</span></td>
-        <td style="font-size:11px;color:#666;font-style:italic">${t.notas}</td>
+        ${i === 0 ? `<td rowspan="${filas.length}" style="background:#f0fdf4;font-weight:600;vertical-align:middle;white-space:nowrap">${fecha}</td>` : ''}
+        <td style="white-space:nowrap">${t.hora || '—'}</td>
+        <td style="font-weight:500">${t.farmaco}</td>
+        <td>${t.dosis || '—'}</td>
+        <td><span style="background:#e6f4f1;color:#0f766e;padding:2px 8px;border-radius:10px;font-size:11px">${t.momento || '—'}</span></td>
       </tr>
-    `).join('');
-  }).join('');
+    `).join('')
+  ).join('');
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -118,27 +83,24 @@ export async function exportarPDFTomas(uid, nombrePaciente, fechaDesde, fechaHas
     * { margin:0; padding:0; box-sizing:border-box; }
     body { font-family:'Segoe UI',Arial,sans-serif; color:#1e2e2c; background:white; padding:36px; font-size:13px; }
     .header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:28px; padding-bottom:18px; border-bottom:2px solid #0f766e; }
-    .logo { display:flex; align-items:center; gap:12px; }
-    .logo-icon { width:44px; height:44px; background:#0f766e; border-radius:12px; display:flex; align-items:center; justify-content:center; }
+    .logo-icon { width:44px; height:44px; background:#0f766e; border-radius:12px; display:flex; align-items:center; justify-content:center; margin-right:12px; }
+    .logo { display:flex; align-items:center; }
     .app-name { font-size:22px; font-weight:700; color:#0f766e; }
     .app-sub { font-size:11px; color:#8fa39f; margin-top:2px; }
-    .report-meta { text-align:right; }
-    .report-title { font-size:16px; font-weight:600; color:#1e2e2c; }
-    .report-date { font-size:11px; color:#8fa39f; margin-top:4px; }
-    .patient-box { background:#e6f4f1; border-radius:10px; padding:12px 18px; margin-bottom:24px; display:flex; justify-content:space-between; align-items:center; }
+    .report-title { font-size:16px; font-weight:600; color:#1e2e2c; text-align:right; }
+    .report-date { font-size:11px; color:#8fa39f; margin-top:4px; text-align:right; }
+    .patient-box { background:#e6f4f1; border-radius:10px; padding:12px 18px; margin-bottom:20px; display:flex; justify-content:space-between; }
     .patient-label { font-size:11px; color:#095e57; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:3px; }
     .patient-value { font-size:15px; font-weight:600; color:#0f766e; }
-    .stats { display:flex; gap:16px; margin-bottom:24px; }
+    .stats { display:flex; gap:12px; margin-bottom:20px; }
     .stat { background:#f8faf9; border:1px solid #b3ddd6; border-radius:10px; padding:10px 16px; text-align:center; flex:1; }
     .stat-val { font-size:20px; font-weight:700; color:#0f766e; }
     .stat-label { font-size:10px; color:#8fa39f; margin-top:2px; text-transform:uppercase; }
     table { width:100%; border-collapse:collapse; margin-bottom:24px; }
     th { background:#0f766e; color:white; padding:9px 10px; font-size:11px; font-weight:600; text-align:left; }
-    th:first-child { border-radius:8px 0 0 0; }
-    th:last-child { border-radius:0 8px 0 0; }
+    th:first-child { border-radius:8px 0 0 0; } th:last-child { border-radius:0 8px 0 0; }
     td { padding:8px 10px; border-bottom:1px solid #f0f0f0; vertical-align:middle; font-size:12px; }
-    tr:nth-child(even) td:not(:first-child) { background:#fafafa; }
-    .footer { margin-top:24px; padding-top:14px; border-top:1px solid #e6f4f1; display:flex; justify-content:space-between; font-size:10px; color:#8fa39f; }
+    .footer { padding-top:14px; border-top:1px solid #e6f4f1; display:flex; justify-content:space-between; font-size:10px; color:#8fa39f; }
     @media print { body { padding:20px; } }
   </style>
 </head>
@@ -155,7 +117,7 @@ export async function exportarPDFTomas(uid, nombrePaciente, fechaDesde, fechaHas
         <div class="app-sub">Sistema de Control y Seguimiento para pacientes ES</div>
       </div>
     </div>
-    <div class="report-meta">
+    <div>
       <div class="report-title">Informe de Medicación</div>
       <div class="report-date">Generado el ${hoy}</div>
       <div class="report-date">Período: ${desde} — ${hasta}</div>
@@ -167,50 +129,49 @@ export async function exportarPDFTomas(uid, nombrePaciente, fechaDesde, fechaHas
       <div class="patient-label">Paciente</div>
       <div class="patient-value">${nombrePaciente || 'Paciente'}</div>
     </div>
-    <div style="text-align:right">
-      <div class="patient-label">Total de tomas previstas</div>
-      <div class="patient-value">${filas.length}</div>
+    <div>
+      <div class="patient-label">Total de tomas registradas</div>
+      <div class="patient-value">${tomas.length}</div>
     </div>
   </div>
 
   <div class="stats">
     <div class="stat">
       <div class="stat-val">${Object.keys(porFecha).length}</div>
-      <div class="stat-label">Días con medicación</div>
+      <div class="stat-label">Días registrados</div>
     </div>
     <div class="stat">
-      <div class="stat-val">${[...new Set(filas.map(f => f.medicamento))].length}</div>
-      <div class="stat-label">Medicamentos distintos</div>
+      <div class="stat-val">${[...new Set(tomas.map(t => t.farmaco))].length}</div>
+      <div class="stat-label">Medicamentos</div>
     </div>
     <div class="stat">
-      <div class="stat-val">${Math.round(filas.length / Math.max(Object.keys(porFecha).length, 1) * 10) / 10}</div>
+      <div class="stat-val">${Math.round(tomas.length / Math.max(Object.keys(porFecha).length,1) * 10) / 10}</div>
       <div class="stat-label">Tomas por día</div>
     </div>
   </div>
 
   <table>
     <thead>
-      <tr>
-        <th>Fecha</th>
-        <th>Medicamento</th>
-        <th>Dosis</th>
-        <th>Momento</th>
-        <th>Notas</th>
-      </tr>
+      <tr><th>Fecha</th><th>Hora</th><th>Medicamento</th><th>Dosis</th><th>Momento</th></tr>
     </thead>
     <tbody>${rowsHTML}</tbody>
   </table>
 
   <div class="footer">
-    <span>ScleroApp · Informe generado automáticamente · ${hoy}</span>
-    <span>Documento de uso médico personal. Consulte siempre con su médico.</span>
+    <span>ScleroApp · Informe de tomas registradas por el paciente · ${hoy}</span>
+    <span>Documento de uso médico personal.</span>
   </div>
 </body>
 </html>`;
 
-  const win = window.open('', '_blank');
-  win.document.write(html);
-  win.document.close();
-  setTimeout(() => win.print(), 800);
-  return filas.length;
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const desdeN = fechaDesde.toLocaleDateString('es-ES').replace(/\//g, '-');
+  const hastaN = fechaHasta.toLocaleDateString('es-ES').replace(/\//g, '-');
+  a.download = `ScleroApp_Medicacion_${desdeN}_${hastaN}.html`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  return tomas.length;
 }
