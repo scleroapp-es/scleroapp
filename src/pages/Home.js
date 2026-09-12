@@ -44,7 +44,6 @@ export default function Home() {
   const navigate = useNavigate();
   const [cuestionarioHoy, setCuestionarioHoy] = useState({ manana: false, noche: false });
   const [proximasCitas, setProximasCitas] = useState([]);
-  const [proximasPruebas, setProximasPruebas] = useState([]);
   const [diasCiclo, setDiasCiclo] = useState(null);
   const [enPeriodo, setEnPeriodo] = useState(false);
   const [proximaFechaCiclo, setProximaFechaCiclo] = useState(null);
@@ -66,16 +65,6 @@ export default function Home() {
         const qCitas = query(collection(db, 'citas'), where('uid', '==', user.uid), where('fecha', '>=', fechaHoy), orderBy('fecha', 'asc'), limit(2));
         const snapCitas = await getDocs(qCitas);
         setProximasCitas(snapCitas.docs.map(d => ({ id: d.id, ...d.data() })));
-
-        // Pruebas: traer todas las del usuario ordenadas por fecha desc, filtrar en cliente
-        const qPruebas = query(collection(db, 'pruebas'), where('uid', '==', user.uid), orderBy('fecha', 'desc'), limit(10));
-        const snapPruebas = await getDocs(qPruebas);
-        const todasPruebas = snapPruebas.docs.map(d => ({ id: d.id, ...d.data() }));
-        // Priorizar futuras, luego más recientes
-        const futuras = todasPruebas.filter(p => p.fecha >= fechaHoy).sort((a, b) => a.fecha.localeCompare(b.fecha));
-        const pasadas = todasPruebas.filter(p => p.fecha < fechaHoy);
-        const listaPruebas = [...futuras, ...pasadas].slice(0, 2);
-        setProximasPruebas(listaPruebas);
         // Ciclo menstrual
         try {
           const qMens = query(collection(db, 'menstruacion'), where('uid', '==', user.uid), orderBy('fecha_inicio', 'desc'), limit(1));
@@ -198,26 +187,6 @@ export default function Home() {
             <p style={{ fontSize: 13, color: 'var(--slate-400)', textAlign: 'center', padding: '8px 0' }}>Sin citas próximas</p>
           </SectionCard>
         )}
-
-        {/* 2. Pruebas médicas */}
-        <SectionCard title="Pruebas médicas" to="/pruebas"
-          icon={<svg {...i16}><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v11m0 0a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2m-6 0V9m6 5V9"/></svg>}>
-          {proximasPruebas.length === 0 ? (
-            <p style={{ fontSize: 13, color: 'var(--slate-400)', textAlign: 'center', padding: '8px 0' }}>Sin pruebas registradas</p>
-          ) : proximasPruebas.map((p, i) => (
-            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < proximasPruebas.length - 1 ? '1px solid var(--teal-50)' : 'none' }}>
-              <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--teal-50)', border: '1px solid var(--teal-100)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--teal-700)', lineHeight: 1 }}>{p.fecha?.slice(8)}</span>
-                <span style={{ fontSize: 9, color: 'var(--teal-500)', textTransform: 'uppercase' }}>{p.fecha ? format(parseISO(p.fecha), 'MMM', { locale: es }) : ''}</span>
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--teal-800)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.tipo}</p>
-                {(p.lugar || p.doctor_solicitante) && <p style={{ fontSize: 11, color: 'var(--slate-400)', marginTop: 1 }}>{[p.lugar, p.doctor_solicitante].filter(Boolean).join(' · ')}</p>}
-              </div>
-              <span style={{ fontSize: 10, fontWeight: 500, padding: '3px 8px', borderRadius: 10, background: 'var(--teal-50)', color: 'var(--teal-700)', border: '1px solid var(--teal-100)', flexShrink: 0 }}>{diasRestantes(p.fecha)}</span>
-            </div>
-          ))}
-        </SectionCard>
 
         {/* 3. Cuestionarios del día */}
         <SectionCard title="Cuestionarios de hoy" to="/cuestionarios"
