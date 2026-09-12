@@ -7,11 +7,18 @@ import { usePerfil } from '../hooks/usePerfil';
 import { format, differenceInDays, parseISO, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 
+const MOMENTOS_ORDER = ['Mañana','Con el desayuno','30 min antes del desayuno','En ayunas','Mediodía','Con la comida','30 min antes de la comida','Tarde','Noche','Con la cena','30 min antes de la cena','Al acostarse'];
+
+function getDiaHoy() {
+  const d = new Date().getDay();
+  return d === 0 ? 6 : d - 1;
+}
+
 function QuickBtn({ icon, label, to }) {
   const navigate = useNavigate();
   return (
     <button onClick={() => navigate(to)}
-      style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '10px 2px 10px', background: 'transparent', border: 'none', borderRadius: 10, cursor: 'pointer', transition: 'transform 0.1s' }}
+      style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '10px 2px', background: 'transparent', border: 'none', borderRadius: 10, cursor: 'pointer' }}
       onTouchStart={e => e.currentTarget.style.transform = 'scale(0.95)'}
       onTouchEnd={e => e.currentTarget.style.transform = 'scale(1)'}>
       <div style={{ width: 40, height: 40, borderRadius: 12, background: 'var(--teal-50)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -42,11 +49,15 @@ export default function Home() {
   const { user, logout } = useAuth();
   const { nombre } = usePerfil();
   const navigate = useNavigate();
+
   const [cuestionarioHoy, setCuestionarioHoy] = useState({ manana: false, noche: false });
-  const [proximasCitas, setProximasCitas] = useState([]);
+  const [citasMedicas, setCitasMedicas] = useState([]);
+  const [citasPrueba, setCitasPrueba] = useState([]);
+  const [tratamientoHoy, setTratamientoHoy] = useState({});
   const [diasCiclo, setDiasCiclo] = useState(null);
   const [enPeriodo, setEnPeriodo] = useState(false);
   const [proximaFechaCiclo, setProximaFechaCiclo] = useState(null);
+
   const fechaHoy = format(new Date(), 'yyyy-MM-dd');
   const hoy = format(new Date(), "EEEE, d 'de' MMMM", { locale: es });
   const hour = new Date().getHours();
@@ -57,32 +68,52 @@ export default function Home() {
     if (!user) return;
     async function cargar() {
       try {
-        const qM = query(collection(db, 'cuestionarios'), where('uid', '==', user.uid), where('fecha', '==', fechaHoy), where('tipo', '==', 'manana'));
-        const qN = query(collection(db, 'cuestionarios'), where('uid', '==', user.uid), where('fecha', '==', fechaHoy), where('tipo', '==', 'noche'));
-        const [snapM, snapN] = await Promise.all([getDocs(qM), getDocs(qN)]);
+        // Cuestionarios de hoy
+        const [snapM, snapN] = await Promise.all([
+          getDocs(query(collection(db, 'cuestionarios'), where('uid', '==', user.uid), where('fecha', '==', fechaHoy), where('tipo', '==', 'manana'))),
+          getDocs(query(collection(db, 'cuestionarios'), where('uid', '==', user.uid), where('fecha', '==', fechaHoy), where('tipo', '==', 'noche'))),
+        ]);
         setCuestionarioHoy({ manana: !snapM.empty, noche: !snapN.empty });
 
-        const qCitas = query(collection(db, 'citas'), where('uid', '==', user.uid), where('fecha', '>=', fechaHoy), orderBy('fecha', 'asc'), limit(2));
-        const snapCitas = await getDocs(qCitas);
-        setProximasCitas(snapCitas.docs.map(d => ({ id: d.id, ...d.data() })));
-        // Ciclo menstrual
-        try {
-          const qMens = query(collection(db, 'menstruacion'), where('uid', '==', user.uid), orderBy('fecha_inicio', 'desc'), limit(1));
-          const snapMens = await getDocs(qMens);
-          if (!snapMens.empty) {
-            const ultima = snapMens.docs[0].data();
-            const snapConf = await getDoc(doc(db, 'configuracion', user.uid));
-            const cicloDias = snapConf.exists() && snapConf.data().cicloDias ? snapConf.data().cicloDias : 28;
-            const duracion = snapConf.exists() && snapConf.data().duracionDias ? snapConf.data().duracionDias : 5;
-            const ultimaFecha = parseISO(ultima.fecha_inicio);
-            const proxima = addDays(ultimaFecha, cicloDias);
-            const diff = differenceInDays(proxima, new Date());
-            setDiasCiclo(diff);
-            setProximaFechaCiclo(proxima);
-            const finPeriodo = addDays(ultimaFecha, ultima.duracion_real || duracion);
-            setEnPeriodo(differenceInDays(new Date(), ultimaFecha) >= 0 && differenceInDays(finPeriodo, new Date()) > 0);
+        // Citas — traer 10 para filtrar 2 de cada tipo
+        const snapCitas = await getDocs(
+          query(collection(db, 'citas'), where('uid', '==', user.uid), where('fecha', '>=', fechaHoy), orderBy('fecha', 'asc'), limit(10))
+        );
+        const todasCitas = snapCitas.docs.map(d => ({ id: d.id, ...d.data() }));
+        setCitasMedicas(todasCitas.filter(c => c.tipo_cita !== 'prueba').slice(0, 2));
+        setCitasPrueba(todasCitas.filter(c => c.tipo_cita === 'prueba').slice(0, 2));
+
+        // Tratamientos de hoy
+        const snapTrat = await getDocs(
+          query(collection(db, 'tratamientos'), where('uid', '==', user.uid))
+        );
+        const diaHoy = getDiaHoy();
+        const grupos = {};
+        for (const t of snapTrat.docs.map(d => d.data())) {
+          if (t.activo === false || !t.dias?.includes(diaHoy)) continue;
+          for (const m of (t.momentos || [])) {
+            if (!grupos[m]) grupos[m] = [];
+            grupos[m].push(t);
           }
-        } catch (e) {}
+        }
+        setTratamientoHoy(grupos);
+
+        // Ciclo menstrual
+        const snapMens = await getDocs(
+          query(collection(db, 'menstruacion'), where('uid', '==', user.uid), orderBy('fecha_inicio', 'desc'), limit(1))
+        );
+        if (!snapMens.empty) {
+          const ultima = snapMens.docs[0].data();
+          const snapConf = await getDoc(doc(db, 'configuracion', user.uid));
+          const cicloDias = snapConf.exists() && snapConf.data().cicloDias ? snapConf.data().cicloDias : 28;
+          const duracion = snapConf.exists() && snapConf.data().duracionDias ? snapConf.data().duracionDias : 5;
+          const ultimaFecha = parseISO(ultima.fecha_inicio);
+          const proxima = addDays(ultimaFecha, cicloDias);
+          setDiasCiclo(differenceInDays(proxima, new Date()));
+          setProximaFechaCiclo(proxima);
+          const finPeriodo = addDays(ultimaFecha, ultima.duracion_real || duracion);
+          setEnPeriodo(differenceInDays(new Date(), ultimaFecha) >= 0 && differenceInDays(finPeriodo, new Date()) > 0);
+        }
       } catch (e) {}
     }
     cargar();
@@ -95,18 +126,21 @@ export default function Home() {
     return `En ${diff} días`;
   }
 
-  const i16 = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "var(--teal-500)", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
-  const i20 = { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "var(--teal-500)", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
+  const i16 = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'var(--teal-500)', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  const i20 = { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'var(--teal-500)', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' };
+
+  const momentosDeHoy = MOMENTOS_ORDER.filter(m => tratamientoHoy[m]?.length > 0);
 
   return (
     <div style={{ paddingBottom: 100 }}>
+      {/* Cabecera */}
       <div style={{ background: 'var(--teal-500)', padding: '48px 20px 28px', position: 'relative' }}>
         <button onClick={logout} style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 8, padding: '6px 12px', color: 'white', fontSize: 12, cursor: 'pointer' }}>Salir</button>
         <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13, marginBottom: 4, textTransform: 'capitalize' }}>{hoy}</p>
         <h1 style={{ color: 'white', fontSize: 24, fontWeight: 600 }}>{greeting}</h1>
       </div>
 
-      {/* Accesos rápidos - parte superior */}
+      {/* Accesos rápidos */}
       <div style={{ padding: '12px 16px 0', background: 'white', borderBottom: '1px solid var(--teal-50)' }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <QuickBtn to="/tension" label="Tensión" icon={<svg {...i20}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>} />
@@ -120,7 +154,7 @@ export default function Home() {
 
       <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-        {/* 0. Ciclo menstrual - PRIMERO */}
+        {/* 1. PRÓXIMA MENSTRUACIÓN */}
         {diasCiclo !== null && (
           <button onClick={() => navigate('/menstruacion')}
             style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: enPeriodo ? 'var(--teal-50)' : 'white', border: `1px solid ${enPeriodo ? 'var(--teal-300)' : 'var(--teal-100)'}`, borderRadius: 14, cursor: 'pointer', width: '100%', textAlign: 'left' }}>
@@ -139,12 +173,13 @@ export default function Home() {
           </button>
         )}
 
-        {/* 1. Citas médicas próximas */}
-        {proximasCitas.filter(c => c.tipo_cita !== 'prueba').length > 0 && (
-          <SectionCard title="Citas médicas" to="/citas"
-            icon={<svg {...i16}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}>
-            {proximasCitas.filter(c => c.tipo_cita !== 'prueba').slice(0,2).map((c, i, arr) => (
-              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--teal-50)' : 'none' }}>
+        {/* 2. CITAS MÉDICAS */}
+        <SectionCard title="Citas médicas" to="/citas"
+          icon={<svg {...i16}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}>
+          {citasMedicas.length === 0
+            ? <p style={{ fontSize: 13, color: 'var(--slate-400)', textAlign: 'center', padding: '6px 0' }}>Sin citas médicas próximas</p>
+            : citasMedicas.map((c, i) => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < citasMedicas.length - 1 ? '1px solid var(--teal-50)' : 'none' }}>
                 <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--teal-50)', border: '1px solid var(--teal-100)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--teal-700)', lineHeight: 1 }}>{c.fecha?.slice(8)}</span>
                   <span style={{ fontSize: 9, color: 'var(--teal-500)', textTransform: 'uppercase' }}>{c.fecha ? format(parseISO(c.fecha), 'MMM', { locale: es }) : ''}</span>
@@ -156,16 +191,17 @@ export default function Home() {
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 500, padding: '3px 8px', borderRadius: 10, background: 'var(--teal-50)', color: 'var(--teal-700)', border: '1px solid var(--teal-100)', flexShrink: 0 }}>{diasRestantes(c.fecha)}</span>
               </div>
-            ))}
-          </SectionCard>
-        )}
+            ))
+          }
+        </SectionCard>
 
-        {/* 1b. Citas para prueba próximas */}
-        {proximasCitas.filter(c => c.tipo_cita === 'prueba').length > 0 && (
-          <SectionCard title="Pruebas médicas programadas" to="/citas"
-            icon={<svg {...i16}><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v11m0 0a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2m-6 0V9m6 5V9"/></svg>}>
-            {proximasCitas.filter(c => c.tipo_cita === 'prueba').slice(0,2).map((c, i, arr) => (
-              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--teal-50)' : 'none' }}>
+        {/* 3. PRUEBAS MÉDICAS PROGRAMADAS */}
+        <SectionCard title="Pruebas médicas programadas" to="/citas"
+          icon={<svg {...i16}><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v11m0 0a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2m-6 0V9m6 5V9"/></svg>}>
+          {citasPrueba.length === 0
+            ? <p style={{ fontSize: 13, color: 'var(--slate-400)', textAlign: 'center', padding: '6px 0' }}>Sin pruebas médicas programadas</p>
+            : citasPrueba.map((c, i) => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: i < citasPrueba.length - 1 ? '1px solid var(--teal-50)' : 'none' }}>
                 <div style={{ width: 38, height: 38, borderRadius: 10, background: '#faeeda', border: '1px solid #BA7517', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 700, color: '#854F0B', lineHeight: 1 }}>{c.fecha?.slice(8)}</span>
                   <span style={{ fontSize: 9, color: '#BA7517', textTransform: 'uppercase' }}>{c.fecha ? format(parseISO(c.fecha), 'MMM', { locale: es }) : ''}</span>
@@ -177,18 +213,31 @@ export default function Home() {
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 500, padding: '3px 8px', borderRadius: 10, background: '#faeeda', color: '#854F0B', border: '1px solid #BA7517', flexShrink: 0 }}>{diasRestantes(c.fecha)}</span>
               </div>
-            ))}
-          </SectionCard>
-        )}
+            ))
+          }
+        </SectionCard>
 
-        {proximasCitas.length === 0 && (
-          <SectionCard title="Próximas citas" to="/citas"
-            icon={<svg {...i16}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>}>
-            <p style={{ fontSize: 13, color: 'var(--slate-400)', textAlign: 'center', padding: '8px 0' }}>Sin citas próximas</p>
-          </SectionCard>
-        )}
+        {/* 4. TRATAMIENTO DE HOY */}
+        <SectionCard title="Tratamiento de hoy" to="/medicacion"
+          icon={<svg {...i16}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>}>
+          {momentosDeHoy.length === 0
+            ? <p style={{ fontSize: 13, color: 'var(--slate-400)', textAlign: 'center', padding: '6px 0' }}>Sin medicación para hoy</p>
+            : momentosDeHoy.map(m => (
+              <div key={m} style={{ marginBottom: 8 }}>
+                <p style={{ fontSize: 10, fontWeight: 600, color: 'var(--teal-500)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{m}</p>
+                {tratamientoHoy[m].map((t, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', borderBottom: '1px solid var(--teal-50)' }}>
+                    <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--teal-400)', flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, color: 'var(--slate-800)', fontWeight: 500 }}>{t.farmaco}</span>
+                    {t.dosis && <span style={{ fontSize: 11, color: 'var(--slate-400)' }}>· {t.dosis}</span>}
+                  </div>
+                ))}
+              </div>
+            ))
+          }
+        </SectionCard>
 
-        {/* 3. Cuestionarios del día */}
+        {/* 5. CUESTIONARIO DE HOY */}
         <SectionCard title="Cuestionarios de hoy" to="/cuestionarios"
           icon={<svg {...i16}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>}>
           <div style={{ display: 'flex', gap: 10 }}>
@@ -206,7 +255,6 @@ export default function Home() {
             ))}
           </div>
         </SectionCard>
-
 
       </div>
     </div>
