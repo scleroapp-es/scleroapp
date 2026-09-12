@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, query, where, getDocs, deleteDoc, doc, updateDoc, serverTimestamp, orderBy } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, deleteDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { usePerfil } from '../hooks/usePerfil';
 import { getOpcionesConfig } from '../services/opcionesExtra';
 import { format } from 'date-fns';
-import { exportarExcelTomas, exportarPDFTomas } from '../services/reporteMedicacion';
+import { exportarExcelTomas } from '../services/reporteMedicacion';
 import { es } from 'date-fns/locale';
 
 const FARMACOS_DEFAULT = [
@@ -176,46 +176,11 @@ export default function Medicacion() {
   const [form, setForm] = useState(FORM_VACIO);
   const [farmacos, setFarmacos] = useState(FARMACOS_DEFAULT);
   const [verInactivos, setVerInactivos] = useState(false);
-  const [tomasHoy, setTomasHoy] = useState([]);
-  const [registrando, setRegistrando] = useState(null);
   const [mostrarExport, setMostrarExport] = useState(false);
   const [exportDesde, setExportDesde] = useState('');
   const [exportHasta, setExportHasta] = useState('');
   const [exportando, setExportando] = useState(false);
   const [exportMsg, setExportMsg] = useState('');
-
-  async function cargarTomasHoy() {
-    const hoyStr = format(new Date(), 'yyyy-MM-dd');
-    try {
-      const q = query(collection(db, 'tomas'), where('uid', '==', user.uid), where('fecha', '==', hoyStr));
-      const snap = await getDocs(q);
-      setTomasHoy(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch (e) {}
-  }
-
-  async function registrarToma(tratamiento, momento) {
-    const key = `${tratamiento.farmaco}_${momento}`;
-    setRegistrando(key);
-    try {
-      const hoyStr = format(new Date(), 'yyyy-MM-dd');
-      const horaStr = format(new Date(), 'HH:mm');
-      await addDoc(collection(db, 'tomas'), {
-        uid: user.uid,
-        fecha: hoyStr,
-        hora: horaStr,
-        farmaco: tratamiento.farmaco,
-        dosis: tratamiento.dosis || '',
-        momento,
-        timestamp: serverTimestamp(),
-      });
-      cargarTomasHoy();
-    } catch (e) {}
-    setRegistrando(null);
-  }
-
-  function tomadaHoy(farmaco, momento) {
-    return tomasHoy.some(t => t.farmaco === farmaco && t.momento === momento);
-  }
 
   async function cargar() {
     try {
@@ -233,7 +198,7 @@ export default function Medicacion() {
     setFarmacos([...FARMACOS_DEFAULT, ...extras].filter(f => !ocultos.includes(f)));
   }
 
-  useEffect(() => { cargar(); cargarFarmacos(); cargarTomasHoy(); }, []);
+  useEffect(() => { cargar(); cargarFarmacos(); }, []);
 
   function abrirNuevo() {
     setEditando(null);
@@ -308,16 +273,6 @@ export default function Medicacion() {
     setExportando(false);
   }
 
-  async function onExportarPDF() {
-    if (!exportDesde || !exportHasta) { setExportMsg('Selecciona las dos fechas.'); return; }
-    setExportando(true); setExportMsg('');
-    try {
-      const total = await exportarPDFTomas(user.uid, nombre, new Date(exportDesde), new Date(exportHasta));
-      setExportMsg(`Informe PDF generado con ${total} tomas. Usa Ctrl+P para guardarlo.`);
-    } catch (err) { setExportMsg('Error: ' + err.message); }
-    setExportando(false);
-  }
-
   const activos = tratamientos.filter(t => t.activo !== false);
   const inactivos = tratamientos.filter(t => t.activo === false);
   const diaHoy = getDiaHoy();
@@ -374,22 +329,13 @@ export default function Medicacion() {
                 {momentosDeHoy.map(m => (
                   <div key={m}>
                     <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal-500)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{m}</p>
-                    {grupos[m].map((t, i) => {
-                      const yaRegistrada = tomadaHoy(t.farmaco, m);
-                      const key = `${t.farmaco}_${m}`;
-                      return (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--teal-50)' }}>
-                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: yaRegistrada ? '#22c55e' : 'var(--teal-500)', flexShrink: 0 }} />
-                          <span style={{ fontSize: 13, color: 'var(--slate-800)', fontWeight: 500, flex: 1 }}>{t.farmaco}</span>
-                          {t.dosis && <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>· {t.dosis}</span>}
-                          <button type="button" onClick={() => !yaRegistrada && registrarToma(t, m)}
-                            disabled={yaRegistrada || registrando === key}
-                            style={{ fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 8, border: 'none', cursor: yaRegistrada ? 'default' : 'pointer', background: yaRegistrada ? '#f0fdf4' : 'var(--teal-500)', color: yaRegistrada ? '#16a34a' : 'white', flexShrink: 0 }}>
-                            {yaRegistrada ? '✓ Tomada' : registrando === key ? '...' : 'Registrar'}
-                          </button>
-                        </div>
-                      );
-                    })}
+                    {grupos[m].map((t, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--teal-50)' }}>
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--teal-500)', flexShrink: 0 }} />
+                        <span style={{ fontSize: 13, color: 'var(--slate-800)', fontWeight: 500 }}>{t.farmaco}</span>
+                        {t.dosis && <span style={{ fontSize: 12, color: 'var(--slate-400)' }}>· {t.dosis}</span>}
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
@@ -497,18 +443,11 @@ export default function Medicacion() {
                       onChange={e => setExportHasta(e.target.value)} />
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={onExportarPDF} disabled={exportando || !exportDesde || !exportHasta}
-                    style={{ flex: 1, padding: '10px', borderRadius: 8, fontSize: 13, fontWeight: 500, background: exportDesde && exportHasta ? 'var(--teal-500)' : 'var(--slate-200)', color: exportDesde && exportHasta ? 'white' : 'var(--slate-400)', border: 'none', cursor: exportDesde && exportHasta ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                    {exportando ? 'Generando...' : 'Exportar PDF'}
-                  </button>
-                  <button onClick={onExportarExcel} disabled={exportando || !exportDesde || !exportHasta}
-                    style={{ flex: 1, padding: '10px', borderRadius: 8, fontSize: 13, fontWeight: 500, background: exportDesde && exportHasta ? '#16a34a' : 'var(--slate-200)', color: exportDesde && exportHasta ? 'white' : 'var(--slate-400)', border: 'none', cursor: exportDesde && exportHasta ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                    {exportando ? 'Generando...' : 'Exportar CSV'}
-                  </button>
-                </div>
+                <button onClick={onExportarExcel} disabled={exportando || !exportDesde || !exportHasta}
+                  style={{ width: '100%', padding: '10px', borderRadius: 8, fontSize: 13, fontWeight: 500, background: exportDesde && exportHasta ? '#16a34a' : 'var(--slate-200)', color: exportDesde && exportHasta ? 'white' : 'var(--slate-400)', border: 'none', cursor: exportDesde && exportHasta ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                  {exportando ? 'Generando...' : 'Exportar tratamientos a CSV'}
+                </button>
                 {exportMsg && (
                   <div style={{ background: exportMsg.startsWith('Error') ? '#fef2f2' : 'var(--teal-50)', border: `1px solid ${exportMsg.startsWith('Error') ? '#fca5a5' : 'var(--teal-100)'}`, borderRadius: 8, padding: '10px 14px', fontSize: 13, color: exportMsg.startsWith('Error') ? '#dc2626' : 'var(--teal-700)' }}>
                     {exportMsg}
