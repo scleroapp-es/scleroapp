@@ -3,8 +3,10 @@ import { collection, addDoc, query, where, getDocs, deleteDoc, doc, updateDoc, s
 import { db } from '../firebase/config';
 import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
+import { usePerfil } from '../hooks/usePerfil';
 import { getOpcionesConfig } from '../services/opcionesExtra';
 import { format } from 'date-fns';
+import { exportarExcelTomas, exportarPDFTomas } from '../services/reporteMedicacion';
 import { es } from 'date-fns/locale';
 
 const FARMACOS_DEFAULT = [
@@ -165,6 +167,7 @@ function TratamientoForm({ form, setForm, farmacos, onSubmit, onCancel, guardand
 export default function Medicacion() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { nombre } = usePerfil();
   const [tratamientos, setTratamientos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -173,6 +176,11 @@ export default function Medicacion() {
   const [form, setForm] = useState(FORM_VACIO);
   const [farmacos, setFarmacos] = useState(FARMACOS_DEFAULT);
   const [verInactivos, setVerInactivos] = useState(false);
+  const [mostrarExport, setMostrarExport] = useState(false);
+  const [exportDesde, setExportDesde] = useState('');
+  const [exportHasta, setExportHasta] = useState('');
+  const [exportando, setExportando] = useState(false);
+  const [exportMsg, setExportMsg] = useState('');
 
   async function cargar() {
     try {
@@ -253,6 +261,26 @@ export default function Medicacion() {
     if (!window.confirm('¿Eliminar este tratamiento permanentemente?')) return;
     await deleteDoc(doc(db, 'tratamientos', id));
     cargar();
+  }
+
+  async function onExportarExcel() {
+    if (!exportDesde || !exportHasta) { setExportMsg('Selecciona las dos fechas.'); return; }
+    setExportando(true); setExportMsg('');
+    try {
+      const total = await exportarExcelTomas(user.uid, nombre, new Date(exportDesde), new Date(exportHasta));
+      setExportMsg(`CSV descargado con ${total} tomas.`);
+    } catch (err) { setExportMsg('Error: ' + err.message); }
+    setExportando(false);
+  }
+
+  async function onExportarPDF() {
+    if (!exportDesde || !exportHasta) { setExportMsg('Selecciona las dos fechas.'); return; }
+    setExportando(true); setExportMsg('');
+    try {
+      const total = await exportarPDFTomas(user.uid, nombre, new Date(exportDesde), new Date(exportHasta));
+      setExportMsg(`Informe PDF generado con ${total} tomas. Usa Ctrl+P para guardarlo.`);
+    } catch (err) { setExportMsg('Error: ' + err.message); }
+    setExportando(false);
   }
 
   const activos = tratamientos.filter(t => t.activo !== false);
@@ -396,6 +424,55 @@ export default function Medicacion() {
               </div>
             ))}
           </>
+        )}
+
+        {/* Panel de exportación */}
+        {!mostrarForm && tratamientos.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <button onClick={() => { setMostrarExport(!mostrarExport); setExportMsg(''); }}
+              style={{ width: '100%', padding: '11px', borderRadius: 8, fontSize: 13, fontWeight: 500, background: 'var(--slate-100)', color: 'var(--slate-600)', border: '1px solid var(--slate-200)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg>
+              {mostrarExport ? 'Cerrar exportación' : 'Exportar histórico de medicación'}
+            </button>
+
+            {mostrarExport && (
+              <div className="card" style={{ padding: 16, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--slate-700)' }}>Exportar histórico de tomas</p>
+                <p style={{ fontSize: 12, color: 'var(--slate-400)', lineHeight: 1.5 }}>
+                  Se generará un informe con todas las tomas previstas según los tratamientos activos en el rango de fechas seleccionado.
+                </p>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Fecha desde</label>
+                    <input className="input-field" type="date" value={exportDesde}
+                      onChange={e => setExportDesde(e.target.value)} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 12, color: 'var(--slate-400)', display: 'block', marginBottom: 5 }}>Fecha hasta</label>
+                    <input className="input-field" type="date" value={exportHasta}
+                      onChange={e => setExportHasta(e.target.value)} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={onExportarPDF} disabled={exportando || !exportDesde || !exportHasta}
+                    style={{ flex: 1, padding: '10px', borderRadius: 8, fontSize: 13, fontWeight: 500, background: exportDesde && exportHasta ? 'var(--teal-500)' : 'var(--slate-200)', color: exportDesde && exportHasta ? 'white' : 'var(--slate-400)', border: 'none', cursor: exportDesde && exportHasta ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    {exportando ? 'Generando...' : 'Exportar PDF'}
+                  </button>
+                  <button onClick={onExportarExcel} disabled={exportando || !exportDesde || !exportHasta}
+                    style={{ flex: 1, padding: '10px', borderRadius: 8, fontSize: 13, fontWeight: 500, background: exportDesde && exportHasta ? '#16a34a' : 'var(--slate-200)', color: exportDesde && exportHasta ? 'white' : 'var(--slate-400)', border: 'none', cursor: exportDesde && exportHasta ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    {exportando ? 'Generando...' : 'Exportar CSV'}
+                  </button>
+                </div>
+                {exportMsg && (
+                  <div style={{ background: exportMsg.startsWith('Error') ? '#fef2f2' : 'var(--teal-50)', border: `1px solid ${exportMsg.startsWith('Error') ? '#fca5a5' : 'var(--teal-100)'}`, borderRadius: 8, padding: '10px 14px', fontSize: 13, color: exportMsg.startsWith('Error') ? '#dc2626' : 'var(--teal-700)' }}>
+                    {exportMsg}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
 
         {!loading && tratamientos.length === 0 && !mostrarForm && (
